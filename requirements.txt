@@ -1,2 +1,5 @@
-anthropic
-openai
+langchain-core
+langchain-openai
+langchain-anthropic
+roman
+python-dotenv

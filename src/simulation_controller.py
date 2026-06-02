@@ -1,5 +1,7 @@
 import argparse
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 from prompt.map_setting_of_other_battles import *
 from prompt.agent_profile import country_E_Army, country_F_Army, System_Setting, History_Setting
@@ -92,7 +94,7 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='Run a conflict simulation.') 
     parser.add_argument('--conflict_name', type=str, choices=['Poitiers', 'Falkirk', 'Agincourt'], default= "Poitiers",help='choose conflict name') 
-    parser.add_argument('--LLM_MODEL', type=str, choices = ["claude","gpt"], default= "gpt", help='Language model to use') 
+    parser.add_argument('--LLM_MODEL', type=str, choices = ["claude", "gpt", "openrouter", "ollama"], default= "gpt", help='Language model to use') 
     parser.add_argument("--is_GPT4V_activate", type=int, default= 0, help="Use GPT-4 V instead of GPT-4")
     parser.add_argument('--simulation_time', type=int, default=90, help='Number of minutes to simulate')
     parser.add_argument('--update_interval', type=int, default=15, help='Interval for simulation updates')

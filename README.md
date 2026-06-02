@@ -38,15 +38,17 @@ pip install -r requirements.txt
 ```
 
 ### Set up API keys
-If you want to use OpenAI model as base LLM:
+Copy `.env.example` to `.env` and fill in the keys you need:
+```bash
+cp .env.example .env
 ```
-export OPENAI_API_KEY=your_openai_api_key
+Then open `.env` and replace the placeholder values:
 ```
-
-If you want to use Claude model as base:
+OPENAI_API_KEY=your_openai_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
-export CLAUDE_API_KEY=your_claude_api_key
-```
+Keys for providers you don't use can be left as placeholders.
 ### Run BattleAgent Sandbox
 #### Basic Usage
 

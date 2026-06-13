@@ -16,7 +16,6 @@ from treelib import Node, Tree
 # Local application/library-specific imports
 from agent import *
 from procoder.functional import format_prompt, replaced_submodule
-from procoder.prompt import *
 from prompt.map_setting import map_info_json
 from prompt.map_setting_of_other_battles import map_info_json_Agincourt, map_info_json_Falkirk, map_info_json_Poitiers
 from utils.shared_func import *

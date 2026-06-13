@@ -5,7 +5,6 @@ non-merged active agents should not change after a streamlining operation.
 Bug #5 in the plan violates this — those tests are marked xfail.
 """
 
-import pytest
 from agent import BranchStreamlining
 
 

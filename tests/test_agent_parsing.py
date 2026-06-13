@@ -4,7 +4,6 @@ import copy
 import pytest
 from conftest import VALID_COMMANDER_JSON
 
-from agent import Detachment_Agent, BranchStreamlining
 
 
 # ---------------------------------------------------------------------------

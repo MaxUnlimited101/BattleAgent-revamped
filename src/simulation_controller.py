@@ -1,10 +1,8 @@
 import argparse
-import os
 from dotenv import load_dotenv
 load_dotenv()
 
 from prompt.map_setting_of_other_battles import *
-from prompt.agent_profile import country_E_Army, country_F_Army, System_Setting, History_Setting
 from prompt.agent_profile_Poitiers import country_E_Army_Poitiers, country_F_Army_Poitiers, System_Setting_Poitiers, History_Setting_Poitiers
 from prompt.agent_profile_Falkirk import country_E_Army_Falkirk, country_F_Army_Falkirk, System_Setting_Falkirk, History_Setting_Falkirk
 from prompt.agent_profile_Agincourt import country_E_Army_Agincourt, country_F_Army_Agincourt, System_Setting_Agincourt, History_Setting_Agincourt

@@ -3,22 +3,15 @@ import json5 as json
 import pickle
 import uuid
 from abc import ABC, abstractmethod
-from datetime import timedelta
-import re
 
 
 # Local application/library-specific imports
 from procoder.functional import format_prompt#, replaced_submodule
 from procoder.prompt import *
 
-from prompt import Detachment_Agent_prompt
-from prompt.action_space_setting import action_list, action_property_definition
-from prompt.Detachment_Agent_prompt import action_instruction_block, json_constraint_variable, json_example_text
 from prompt.Detachment_Agent_prompt import *
-from prompt.map_setting import map_info_json
 
 # Conflict info
-from prompt.agent_profile import country_E_Army, country_F_Army, System_Setting, History_Setting
 
 from utils.LLM_api import run_LLM
 from utils.VLM_api import run_gpt4v

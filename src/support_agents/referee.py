@@ -5,8 +5,6 @@ current_file_path = os.path.abspath(__file__)
 parent_directory = os.path.dirname(os.path.dirname(current_file_path))
 sys.path.append(parent_directory)
 
-from prompt.map_setting import map_info_json
-from prompt.map_setting_of_other_battles import map_info_json_Agincourt, map_info_json_Falkirk, map_info_json_Poitiers
 
 from utils.LLM_api import run_LLM
 import json5 as json

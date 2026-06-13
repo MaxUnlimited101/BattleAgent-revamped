@@ -5,7 +5,6 @@ This test must stay green after every phase.
 """
 import os
 
-import pytest
 
 
 def _make_sandbox():

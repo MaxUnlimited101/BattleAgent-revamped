@@ -1,5 +1,4 @@
 """Tests for TokenAccumulator and run_LLM token capture integration."""
-import pytest
 
 from utils.token_accounting import RoleTokens, TokenAccumulator
 

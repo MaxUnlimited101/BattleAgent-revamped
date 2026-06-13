@@ -1,4 +1,3 @@
-from procoder.functional import format_prompt, replaced_submodule
 from procoder.prompt import *
 
 

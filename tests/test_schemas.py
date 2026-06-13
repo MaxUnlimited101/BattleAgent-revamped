@@ -2,7 +2,7 @@
 import pytest
 from pydantic import ValidationError
 
-from schemas import CasualtiesResponse, CasualtiesResult, CommanderDecision, SubAgentAction
+from schemas import CasualtiesResponse, CommanderDecision, SubAgentAction
 
 VALID_COMMANDER = {
     "agentNextActionType": "Defend",

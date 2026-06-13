@@ -1,9 +1,7 @@
-from functools import partial
 
 from procoder.utils.my_typing import *
-from procoder.utils.my_typing import Any, Dict
 
-from .base import TS, Module, T, as_module
+from .base import TS
 from .sequential import *
 from .utils import make_ordered_dict
 

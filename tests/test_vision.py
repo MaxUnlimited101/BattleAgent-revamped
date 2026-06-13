@@ -4,7 +4,6 @@ Bug #6: fog of war is dead code — AgentInfoCollector default threshold_distanc
 covers the entire ±1000 map, making all agents omniscient.
 """
 
-import math
 import pytest
 from utils.shared_func import AgentInfoCollector, vision_filter
 

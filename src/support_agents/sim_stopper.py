@@ -1,6 +1,3 @@
-import uuid
-
-
 def ceasefire_decision_maker(root_agent):
     def traverse(agent, level=1):
         if not agent:

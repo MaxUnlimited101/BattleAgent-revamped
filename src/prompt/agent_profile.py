@@ -79,7 +79,7 @@ country_F_Army = NamedBlock(
             name="Military Capability",
             content="\n(1) Dependent on armored knights and crossbowmen \n(2) Less effective strategy and equipment against enermy tactics"
         ),
-        ###后面加的
+        ### added later
         NamedVariable(
             refname="force_size_composition_F",
             name="Force Size and Composition",

@@ -8,7 +8,6 @@ parent_directory = os.path.dirname(os.path.dirname(current_file_path))
 sys.path.append(parent_directory)
 
 from utils.LLM_api import run_LLM
-from utils.VLM_api import run_gpt4v
 
 
 country_E_profile_1 = {
@@ -466,29 +465,29 @@ country_F_profile_15 = {
 
 
 class Soldier_Hierarchy:
-    def __init__(self, current_troop = None, sub_agents = []):
+    def __init__(self, current_troop=None, sub_agents=None):
         self.current_troop = current_troop
-        self.sub_troop = current_troop.hierarchy.sub_agents
+        self.sub_troop = list(current_troop.hierarchy.sub_agents)
 
     def monitor_structure_change(self, current_troop):
         new_sub_agents = current_troop.hierarchy.sub_agents
         new_detached_troop_list = [agent for agent in new_sub_agents if agent not in self.sub_troop]
-        self.sub_troop = new_sub_agents # 更新当前的 sub_troop 列表
-        return new_detached_troop_list  # 返回新分离的部队列表
+        self.sub_troop = list(new_sub_agents)
+        return new_detached_troop_list
 
     def calculate_transfer_probability_and_decide(self, current_troop, new_detached_troop_list):
         original_num_of_troops = current_troop.profile.original_num_of_troops
         total_troops = sum(new_troop.profile.original_num_of_troops for new_troop in new_detached_troop_list) + original_num_of_troops
         stay_probability = original_num_of_troops / total_troops
         
-        probabilities = [(current_troop, stay_probability)]  # 包含留在原地的概率
+        probabilities = [(current_troop, stay_probability)]  # includes the probability of staying in place
         for new_troop in new_detached_troop_list:
             transfer_probability = new_troop.profile.original_num_of_troops / total_troops
             probabilities.append((new_troop, transfer_probability))
-        
-        # 根据概率决定去向
+
+        # decide the destination based on probability
         decision = random.choices(population=probabilities, weights=[prob[1] for prob in probabilities], k=1)[0]
-        return decision[0]  # 返回选择的部队
+        return decision[0]  # return the selected troop
 
 class Soldier_Profile:
     def __init__(self, profile, model_type = None):
@@ -507,19 +506,20 @@ class Soldier_Profile:
         self.journal = {}
 
         self.model_type = model_type
-        
+        self.token_accumulator = None
+
         self.injury_list = []
         
     def injury_generator(self):
-        # 受伤部位：[左腿，右腿，头....]
-        #受伤原因：【钝器，刀，剑，踩踏，马】
-        #受伤程度：【轻伤，中伤，重伤】
-        #受伤后的状态：【行动不便，疼痛，头晕，失血过多】
+        # injury location: [left leg, right leg, head....]
+        # injury cause: [blunt weapon, knife, sword, trampling, horse]
+        # injury severity: [minor injury, moderate injury, severe injury]
+        # post-injury condition: [restricted movement, pain, dizziness, excessive blood loss]
         injury_part = ['left leg', 'right leg', 'head', 'left arm', 'right arm', 'chest', 'back', 'abdomen']
         injury_reason = ['blunt weapon', 'knife', 'sword', 'trampling', 'horse']
         injury_degree = ['minor injury', 'moderate injury', 'severe injury']
         injury_status = ['inconvenient movement', 'pain', 'dizziness', 'excessive blood loss']
-        #受伤概率： 0.5 percent
+        # injury probability: 0.5 percent
         if random.random() < 0.3:
             part = random.choice(injury_part)
             reason = random.choice(injury_reason)
@@ -554,8 +554,8 @@ class Soldier_Profile:
         states = self.run_model(prompt)
         return summary, states
     
-    def run_model(self, prompt):    
-        return run_LLM(self.model_type, prompt)
+    def run_model(self, prompt):
+        return run_LLM(self.model_type, prompt, self.token_accumulator, "diary")
     
     
 
@@ -566,32 +566,32 @@ class Soldier_Agent():
         self.hierarchy = hierarchy
         
     def execute(self, executed_troop, command, surrounding, time):
-        # 检测并获取结构变化
+        # detect and obtain structural changes
         new_detached_troop_list = self.hierarchy.monitor_structure_change(executed_troop)
-        
-        # 如果检测到结构变化（即列表不为空），则可能需要计算转移概率
+
+        # if structural changes are detected (i.e., the list is not empty), calculate transfer probabilities
         if new_detached_troop_list:
-            # 使用更新的calculate_transfer_probability_and_decide方法来决定是否转移
+            # use calculate_transfer_probability_and_decide to decide whether to transfer
             decision = self.hierarchy.calculate_transfer_probability_and_decide(self.hierarchy.current_troop, new_detached_troop_list)
-            
-            # 如果决定转移（decision不是当前部队），则更新当前部队
+
+            # if the decision is to transfer (decision is not the current troop), update the current troop
             if decision and decision != self.hierarchy.current_troop:
-                # 更新士兵的当前部队
+                # update the soldier's current troop
                 self.hierarchy.current_troop = decision
-                # 同时更新层级结构，这可能需要进一步的方法来实现
+                # also update the hierarchy structure
                 self.hierarchy.sub_troop = decision.hierarchy.sub_agents
 
-        # 构建提示，生成和收集日志
+        # build prompt, generate and collect journal
         current_prompt = self.profile.construct_prompt(command, surrounding)
         journal_entity = self.profile.generate_journal(current_prompt)
 
         self.profile.collect_journal(time, journal_entity)
 
-        # 这里可以添加更多的逻辑，比如根据日志结果做出进一步的决策等
+        # more logic can be added here, such as making further decisions based on journal results
         
         
 
-# 创建士兵配置文件的实例并存储在字典中，以国家分组
+# create instances of soldier profiles and store them in a dictionary, grouped by country
 Soldier_Profiles = {
     "country_E": [Soldier_Profile(profile) for profile in [
         country_E_profile_1, country_E_profile_2, country_E_profile_3, country_E_profile_4, country_E_profile_5,
@@ -607,32 +607,34 @@ Soldier_Profiles = {
 
 
 class SoldierCollector:
-    def __init__(self, soldier_profiles_for_nationality, initial_root_agent, model_type= None):
+    def __init__(self, soldier_profiles_for_nationality, initial_root_agent, model_type=None):
         # Now expects profiles for a single nationality
         self.soldier_profiles = soldier_profiles_for_nationality
         self.model_type = model_type
-        
+        self.token_accumulator = None
+
         self.initial_root_agent = initial_root_agent
         self.soldier_agents_list = self._initialize_soldier_agents()
-        
+
     def _initialize_soldier_agents(self):
         """Initialize Soldier Agents based on the soldier profiles provided."""
         soldier_agents = []
         for profile in self.soldier_profiles:
             profile.model_type = self.model_type
+            profile.token_accumulator = self.token_accumulator
             hierarchy = Soldier_Hierarchy(self.initial_root_agent)  # Assuming this is correctly implemented
             soldier_agent = Soldier_Agent(profile, hierarchy)
             soldier_agents.append(soldier_agent)
         return soldier_agents
     
     def get_soldiers(self, obj):
-        """根据给定对象的层级ID返回所有与之匹配的士兵代理列表。如果没有找到匹配的代理，则返回空列表。"""
-        matching_soldiers = []  # 初始化一个空列表来存储匹配的士兵代理
+        """Return a list of all soldier agents matching the given object's hierarchy ID. Return an empty list if no matching agents are found."""
+        matching_soldiers = []  # initialize an empty list to store matching soldier agents
         for soldier in self.soldier_agents_list:
             current_troop = soldier.hierarchy.current_troop
             if current_troop.hierarchy.id == obj.hierarchy.id:
-                matching_soldiers.append(soldier)  # 将匹配的士兵代理添加到列表中
-        return matching_soldiers  # 返回包含所有匹配士兵代理的列表
+                matching_soldiers.append(soldier)  # add the matching soldier agent to the list
+        return matching_soldiers  # return the list containing all matching soldier agents
     
 if __name__ == '__main__':
 

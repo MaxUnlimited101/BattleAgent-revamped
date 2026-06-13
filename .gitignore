@@ -22,3 +22,5 @@ build/
 
 *.log
 *.pkl
+logs/
+.venv/

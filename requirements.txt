@@ -1,5 +1,13 @@
+# Core LangChain stack — pin after migration PR lands
 langchain-core
 langchain-openai
 langchain-anthropic
-roman
-python-dotenv
+
+# Runtime deps
+roman>=5.2
+python-dotenv>=1.2.2
+json5>=0.14.0
+treelib>=1.8.0
+tqdm>=4.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0

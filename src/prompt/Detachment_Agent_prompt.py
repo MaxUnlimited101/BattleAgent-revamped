@@ -34,7 +34,7 @@ final_action_variable = NamedVariable(
     content="Format your final action list in JSON. and follow json template in the ##json constraint."
 )
 
-# 构建提示块
+# build prompt block
 action_instruction_block = NamedBlock(
     refname="Action_Choosing_Instruction",
     name="Action Choosing Instructions",

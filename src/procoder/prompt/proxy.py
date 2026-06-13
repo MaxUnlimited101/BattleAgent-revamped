@@ -1,5 +1,4 @@
-
-from procoder.utils.my_typing import *
+from typing import Dict
 
 from .base import Module, T, as_module
 

@@ -1,4 +1,4 @@
-from procoder.prompt import *
+from procoder.prompt import Block, Collection, NamedBlock, NamedVariable, Sequential
 
 
 RoleSetting = NamedVariable(

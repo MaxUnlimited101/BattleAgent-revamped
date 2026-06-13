@@ -10,14 +10,10 @@ from tqdm import tqdm
 from treelib import Tree
 
 # Local application/library-specific imports
-from agent import *
-from procoder.prompt import *
-from utils.shared_func import *
-# from utils.surrounding_visualization import plot_tactical_positions
-
-from group_experience.individual_profile import * #SoldierCollector
-
-from support_agents.referee import *
+from agent import AgentExecutionError
+from utils.shared_func import vision_decoder
+from group_experience.individual_profile import Soldier_Profiles, SoldierCollector
+from support_agents.referee import Action_Interact_Evaluation
 from support_agents.sim_stopper import ceasefire_decision_maker
 random.seed(42)
 

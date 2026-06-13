@@ -39,7 +39,6 @@ def external_construct_judgment_prompt(agent, attacker_dict, attacked_by_agent_l
     
     agent_id = agent.hierarchy.id
     agent_location = agent.profile.position
-    agent_profile = agent.profile
     remaining_troops = agent.profile.remaining_num_of_troops  
     current_action = agent.profile.current_action  
     troopType = agent.profile.troopType

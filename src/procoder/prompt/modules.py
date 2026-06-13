@@ -1,8 +1,5 @@
-
-from procoder.utils.my_typing import *
-
 from .base import TS
-from .sequential import *
+from .sequential import Sequential, number_indexing
 from .utils import make_ordered_dict
 
 

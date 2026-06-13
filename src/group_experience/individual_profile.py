@@ -535,7 +535,6 @@ class Soldier_Profile:
         personal_definition = "This is your bio:\n" + f"Name: {self.name}\nAge: {self.age}\nFamily: {self.family}\nOccupation: {self.occupation}\nPersonality: {self.personality}\nSocial Status: {self.social_status}\nPotential Illness: {self.potential_illness}\nBody Condition: {self.body_condition}\nHobbies and Interests: {self.hobbies_and_interests}\nStyle of Talking: {self.style_of_talking}\nUnique Quirks: {self.unique_quirks}\nSecrets or Scandals: {self.secrets_or_scandals}\n"
 
         command = f"Now you are given the following command: {command}\nThis is the surrounding of you: {surrounding}"
-        past_journal = "This is your previous journal.\n {self.journal}\n"
         jounal_command = "You will write down your thoughts and feelings after being given this command and working based on the command in a journal. Associate your thoughts,feelings with the bio you are given."
         return system_info + "\n" + personal_definition + "\n" + injury_situation +  "\n" + command + '\n' + jounal_command
 

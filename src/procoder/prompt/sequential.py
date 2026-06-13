@@ -1,9 +1,7 @@
-from typing import overload
-
-from procoder.utils.my_typing import *
+from collections import OrderedDict
+from typing import Callable, Dict, overload
 
 from .base import Module, as_module
-from .utils import *
 
 
 class Sequential(Module):

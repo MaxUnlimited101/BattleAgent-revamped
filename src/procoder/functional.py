@@ -1,6 +1,6 @@
 import copy
-
-from procoder.utils.my_typing import *
+from collections import OrderedDict
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .prompt.base import TS, Module, Single, T, as_module
 from .prompt.proxy import AddIndentProxy, SilenceProxy

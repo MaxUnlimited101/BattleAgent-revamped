@@ -1,4 +1,7 @@
-from procoder.utils.my_typing import *
+from collections import OrderedDict
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, TypeVar, Union
+
+from procoder.utils.my_typing import typename
 
 T = TypeVar("T", bound="Module")
 TS = Union[T, str]

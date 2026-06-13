@@ -1,5 +1,5 @@
 from procoder.functional import format_prompt
-from procoder.prompt import *
+from procoder.prompt import Collection, NamedBlock, NamedVariable
 
 
 battle_end_conditions = {

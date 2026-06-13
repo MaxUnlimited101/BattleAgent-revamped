@@ -2,12 +2,20 @@ import argparse
 from dotenv import load_dotenv
 load_dotenv()
 
-from prompt.map_setting_of_other_battles import *
+from prompt.map_setting_of_other_battles import map_info_json_Agincourt, map_info_json_Falkirk, map_info_json_Poitiers
 from prompt.agent_profile_Poitiers import country_E_Army_Poitiers, country_F_Army_Poitiers, System_Setting_Poitiers, History_Setting_Poitiers
 from prompt.agent_profile_Falkirk import country_E_Army_Falkirk, country_F_Army_Falkirk, System_Setting_Falkirk, History_Setting_Falkirk
 from prompt.agent_profile_Agincourt import country_E_Army_Agincourt, country_F_Army_Agincourt, System_Setting_Agincourt, History_Setting_Agincourt
+from prompt.Detachment_Agent_prompt import (
+    RoleSetting,
+    TroopInformation,
+    action_instruction_block,
+    json_constraint_variable,
+    json_example_text,
+)
+from prompt.action_space_setting import action_list, action_property_definition
 
-from agent import *
+from agent import ConstantPromptConfig, Detachment_Agent, Detachment_AgentHierarchy, Detachment_AgentProfile
 from sandbox import Sandbox
 
 class ConflictConfig():

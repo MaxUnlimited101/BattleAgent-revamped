@@ -6,10 +6,8 @@ from abc import ABC, abstractmethod
 
 
 # Local application/library-specific imports
-from procoder.functional import format_prompt#, replaced_submodule
-from procoder.prompt import *
-
-from prompt.Detachment_Agent_prompt import *
+from procoder.functional import format_prompt
+from procoder.prompt import Sequential, sharp2_indexing
 
 # Conflict info
 
@@ -179,8 +177,7 @@ class Detachment_AgentProfile:
         self.moral = "Medium"
         
     def position_updated_hist(self, round_nb,new_position):
-        next_round_nb = round_nb + 1
-        self.position_hist_dict[round_nb] = new_position   
+        self.position_hist_dict[round_nb] = new_position
     
     def get_position_hist(self):
         return self.init_position, self.position_hist_dict    
@@ -400,7 +397,7 @@ class Detachment_Agent(BasicAgent):
         
         if parsed_json["SubAgentsRecall"]:
             for recalled_agent_id in parsed_json["SubAgentsRecall"]:
-                bS_message = BranchStreamlining(self, recalled_agent_id)
+                BranchStreamlining(self, recalled_agent_id)
                 print("do the BranchStreamlining")
                 
         if self.profile.position != parsed_json["agentNextPosition"]:

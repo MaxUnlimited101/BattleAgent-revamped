@@ -1,11 +1,6 @@
-from functools import partial
-
-from procoder.utils.my_typing import *
-from procoder.utils.my_typing import Any, Dict
-
-from .base import TS, Module, T, as_module
-from .sequential import *
-from .utils import make_ordered_dict
+from .base import TS
+from .sequential import Sequential
+from .utils import make_ordered_dict, number_indexing
 
 
 class Paired(Sequential):

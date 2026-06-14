@@ -1,5 +1,4 @@
-from procoder.functional import format_prompt, replaced_submodule
-from procoder.prompt import *
+from procoder.prompt import Collection, NamedBlock, NamedVariable
 
 
 System_Setting_Agincourt = NamedVariable(

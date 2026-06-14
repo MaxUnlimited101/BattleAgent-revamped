@@ -1,14 +1,12 @@
 import math
 
 
-def vision_decoder(visionRequest_agent, shuffled_agent_list, extCallType = None):
-    # Decode the vision information of the agent
-    mutual_position_dict = AgentInfoCollector(shuffled_agent_list, visionRequest_agent)
-    vision_info = mutual_position_dict
-    return vision_info
-    
-    
-def AgentInfoCollector(shuffled_agent_list, request_agent, threshold_distance = 100000):
+def vision_decoder(visionRequest_agent, shuffled_agent_list, extCallType=None, vision_range=100000):
+    mutual_position_dict = AgentInfoCollector(shuffled_agent_list, visionRequest_agent, threshold_distance=vision_range)
+    return mutual_position_dict
+
+
+def AgentInfoCollector(shuffled_agent_list, request_agent, threshold_distance=100000):
     def calculate_distance_and_bearing(from_position, to_position):
         # Calculate the Euclidean distance and round to one decimal place
         distance = round(math.sqrt((to_position[0] - from_position[0]) ** 2 + (to_position[1] - from_position[1]) ** 2), 1)

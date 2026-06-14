@@ -5,11 +5,8 @@ current_file_path = os.path.abspath(__file__)
 parent_directory = os.path.dirname(os.path.dirname(current_file_path))
 sys.path.append(parent_directory)
 
-from prompt.map_setting import map_info_json
-from prompt.map_setting_of_other_battles import map_info_json_Agincourt, map_info_json_Falkirk, map_info_json_Poitiers
 
 from utils.LLM_api import run_LLM
-from utils.VLM_api import run_gpt4v
 import json5 as json
 
 def external_action_binding(agent, enemy_troop_list, friendly_troop_list, shuffled_agent_list):
@@ -42,14 +39,13 @@ def external_construct_judgment_prompt(agent, attacker_dict, attacked_by_agent_l
     
     agent_id = agent.hierarchy.id
     agent_location = agent.profile.position
-    agent_profile = agent.profile
     remaining_troops = agent.profile.remaining_num_of_troops  
     current_action = agent.profile.current_action  
     troopType = agent.profile.troopType
 
     map_info_summary = "Map features include: " + ", ".join([
         f"{location} (Coordinates: {details.get('coordinates', '[Not specified]')}): {details['description']}"
-        for location, details in map_info_json["Geography"].items()
+        for location, details in map_info["Geography"].items()
     ]) + ". One coordinate unit is equivalent to 10 yards in the simulated environment."
 
     agent_details = f"""Agent {agent_id}, with {remaining_troops} {troopType} soldier at coordinates {agent_location}, is executing a "{current_action}"."""
@@ -117,11 +113,13 @@ class Action_Interact_Evaluation:
         self.map_info_json = map_info_json
         
         self.model_type = model_type
-        
+        self.token_accumulator = None
+
         self.message_list = []
         self.LLM_response_history = []
-        
+
         self.prompt_history = []
+        self.skipped_casualty_rounds = 0
     def para_update(self, shuffled_agent_list, country_E_agent_list, country_F_agent_list):
         self.shuffled_agent_list = shuffled_agent_list
         self.country_E_agent_list = country_E_agent_list
@@ -165,9 +163,14 @@ class Action_Interact_Evaluation:
                 attempts = 0
                 while attempts < 3:
                     LLM_response = self.run_model(prompt)
-                    if self.parse_llm_output(LLM_response):
+                    parsed_json = self.parse_llm_output(LLM_response)
+                    if parsed_json:
                         break
                     attempts += 1
+                if parsed_json == {}:
+                    print(f"WARNING: referee failed to parse casualty JSON after retries for agent {agent.hierarchy.id}; skipping round.")
+                    self.skipped_casualty_rounds += 1
+                    return None
 
             print(parsed_json)
             print("--------------")
@@ -177,8 +180,8 @@ class Action_Interact_Evaluation:
             
         return message
     
-    def run_model(self, prompt):    
-        return run_LLM(self.model_type, prompt)
+    def run_model(self, prompt):
+        return run_LLM(self.model_type, prompt, self.token_accumulator, "referee")
     
     
     def parse_llm_output(self, LLM_response):

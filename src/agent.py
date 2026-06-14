@@ -3,40 +3,38 @@ import json5 as json
 import pickle
 import uuid
 from abc import ABC, abstractmethod
-from datetime import timedelta
-import re
 
 
 # Local application/library-specific imports
-from procoder.functional import format_prompt#, replaced_submodule
-from procoder.prompt import *
-
-from prompt import Detachment_Agent_prompt
-from prompt.action_space_setting import action_list, action_property_definition
-from prompt.Detachment_Agent_prompt import action_instruction_block, json_constraint_variable, json_example_text
-from prompt.Detachment_Agent_prompt import *
-from prompt.map_setting import map_info_json
+from procoder.functional import format_prompt
+from procoder.prompt import Sequential, sharp2_indexing
 
 # Conflict info
-from prompt.agent_profile import country_E_Army, country_F_Army, System_Setting, History_Setting
 
 from utils.LLM_api import run_LLM
 from utils.VLM_api import run_gpt4v
 from utils.surrounding_visualization import plot_tactical_positions
 
-# 基本代理类
+class AgentExecutionError(Exception):
+    """Raised when an agent fails to produce valid output after max retry attempts."""
+    pass
+
+
+# base agent class
 class BasicAgent(ABC):
     def __init__(self, identity, model_type):
         self.identity = identity
         self.model_type = model_type
         self.history = []
+        self.parser_mode = "legacy"
+        self.token_accumulator = None
         
     @abstractmethod
     def construct_prompt(self):
         pass
 
-    def run_model(self, prompt):    
-        return run_LLM(self.model_type, prompt)
+    def run_model(self, prompt):
+        return run_LLM(self.model_type, prompt, self.token_accumulator, "commander")
             
     @abstractmethod
     def parse_llm_output(self):
@@ -81,14 +79,21 @@ def BranchStreamlining(agent, target_agent_id):
             
             
     if streamlining_label == "Merge":
-        # Do Merge
+        # Return sub-agent's remaining troops to parent pool; grandchildren become
+        # direct sub-agents of parent, so their original counts become parent's deployed.
         agent.profile.deployed_num_of_troops -= sub_agent_entity.profile.original_num_of_troops
+        agent.profile.deployed_num_of_troops += sub_agent_entity.profile.deployed_num_of_troops
         agent.profile.lost_num_of_troops += sub_agent_entity.profile.lost_num_of_troops
-        
+
     elif streamlining_label == "Prune":
-        # Do Prune
+        # Sub-agent's remaining (not-yet-deployed) troops are lost; grandchildren
+        # survive as reparented children, so count their originals as parent's deployed.
         agent.profile.deployed_num_of_troops -= sub_agent_entity.profile.original_num_of_troops
-        agent.profile.lost_num_of_troops += sub_agent_entity.profile.original_num_of_troops
+        agent.profile.deployed_num_of_troops += sub_agent_entity.profile.deployed_num_of_troops
+        agent.profile.lost_num_of_troops += (
+            sub_agent_entity.profile.original_num_of_troops
+            - sub_agent_entity.profile.deployed_num_of_troops
+        )
         
     # disable the subagent
     agent.hierarchy.sub_agents.remove(sub_agent_entity)
@@ -162,7 +167,7 @@ class Detachment_AgentProfile:
         self.history_board = {}
         self.history_board["initial_mission"] = self.initial_mission
         
-        self.current_action = initial_mission # 用于记录当前动作
+        self.current_action = initial_mission # tracks the current action
         self.troopType = ""
         
         self.init_position = position
@@ -172,8 +177,7 @@ class Detachment_AgentProfile:
         self.moral = "Medium"
         
     def position_updated_hist(self, round_nb,new_position):
-        next_round_nb = round_nb + 1
-        self.position_hist_dict[round_nb] = new_position   
+        self.position_hist_dict[round_nb] = new_position
     
     def get_position_hist(self):
         return self.init_position, self.position_hist_dict    
@@ -189,8 +193,8 @@ class Detachment_AgentProfile:
 
 class Detachment_AgentHierarchy:
     def __init__(self, level, parent_agent=None):
-        short_uuid = str(uuid.uuid4())[:8]  # 取UUID的前8位
-        self.id = f"ARMY-{short_uuid}"  # 添加前缀
+        short_uuid = str(uuid.uuid4())[:8]  # take the first 8 characters of the UUID
+        self.id = f"ARMY-{short_uuid}"  # add prefix
         
         self.level = level
         self.parent_agent = parent_agent
@@ -231,7 +235,7 @@ class Detachment_Agent(BasicAgent):
         self.LLM_response_history = {}
         self.round_invalid_messages = []
         self.invalid_messages_history = []
-        self.additional_prompt = "" # 用于暂时存储额外的信息，日后可以加入profile里面
+        self.additional_prompt = "" # temporarily stores extra information, can be added to the profile later
         
         
         self.action_restrictions_require = False
@@ -276,7 +280,9 @@ class Detachment_Agent(BasicAgent):
             invalid_messages.append("agentNextPosition must be an Array of 2 Integers")
         if not isinstance(json_data.get("deploySubUnit"), bool):
             invalid_messages.append("deploySubUnit must be a Boolean")
-        
+        if not isinstance(json_data.get("targetedAgentId", ""), str):
+            invalid_messages.append("targetedAgentId must be a String")
+
         # Validate actions array and its objects
         actions = json_data.get("actions", [])
         if not isinstance(actions, list):
@@ -391,7 +397,7 @@ class Detachment_Agent(BasicAgent):
         
         if parsed_json["SubAgentsRecall"]:
             for recalled_agent_id in parsed_json["SubAgentsRecall"]:
-                bS_message = BranchStreamlining(self, recalled_agent_id)
+                BranchStreamlining(self, recalled_agent_id)
                 print("do the BranchStreamlining")
                 
         if self.profile.position != parsed_json["agentNextPosition"]:
@@ -405,7 +411,7 @@ class Detachment_Agent(BasicAgent):
         # self.profile.position_hist_dict.append(parsed_json["currentAgentPosition"])
 
         self.profile.current_action = parsed_json["agentNextActionType"] + " " + parsed_json["remarks"]
-        self.target_agent_id = parsed_json["targetedAgentId"]
+        self.hierarchy.target_agent_id = parsed_json.get("targetedAgentId", "")
         # Process each action in the actions list
         for action in parsed_json["actions"]:
             if len(action['position']) == 2 and all(isinstance(item, int) for item in action['position']):
@@ -435,7 +441,7 @@ class Detachment_Agent(BasicAgent):
         new_profile = Detachment_AgentProfile(
             identity=self.profile.identity,  
             position=action['position'], 
-            original_num_of_troops=int(action['deployedNum']) if action['deployedNum'] != "All available" else self.profile.remaining_num_of_troops,  # 根据动作设置部队数量
+            original_num_of_troops=int(action['deployedNum']) if action['deployedNum'] != "All available" else self.profile.remaining_num_of_troops,  # set troop count based on action
             initial_mission=action["subAgent_NextActionType"], 
             constant_prompt_config=self.profile.constant_prompt_config  
         )
@@ -450,6 +456,8 @@ class Detachment_Agent(BasicAgent):
         new_sub_agent = Detachment_Agent(self.model_type, new_profile, new_hierarchy)
         new_sub_agent.new_born = True
         new_sub_agent.log_folder_name = self.log_folder_name
+        new_sub_agent.parser_mode = self.parser_mode
+        new_sub_agent.token_accumulator = self.token_accumulator
 
         # Add the new sub-agent to the current hierarchy
         self.hierarchy.add_sub_agent(new_sub_agent)
@@ -525,51 +533,61 @@ class Detachment_Agent(BasicAgent):
         max_attempts = 3
         attempts = 0
 
-        # 更新执行次数
+        # update execution count
         self.hierarchy.target_agent_id = ""
-        
+
         self.execute_nb += 1
 
         if LLM_response in [None, ""]:
             LLM_response = self.run_model(self.prompt)
-            
 
-        # 记录LLM响应历史
+
+        # record LLM response history
         self.LLM_response_history[self.execute_nb] = LLM_response
         
         while attempts < max_attempts:
             extracted_json = self.parse_llm_output(LLM_response)
             print(f"[Execute #{self.execute_nb}] Attempt #{attempts + 1}: Extracted JSON: {extracted_json}")
-            ## Do json validation
-            invalid_messages = self.validate_parsed_output(extracted_json)
-            
+            if self.parser_mode == "structured":
+                from pydantic import ValidationError
+                from schemas import CommanderDecision
+                try:
+                    if not isinstance(extracted_json, dict):
+                        raise TypeError(f"parse returned {type(extracted_json).__name__}, expected dict")
+                    CommanderDecision.model_validate(extracted_json)
+                    invalid_messages = []
+                except (ValidationError, TypeError) as e:
+                    invalid_messages = [str(e)]
+            else:
+                invalid_messages = self.validate_parsed_output(extracted_json)
+
             print("--------------")
 
-            # extra json history 
             self.extracted_json_history[self.execute_nb] = extracted_json
-            
+
             if invalid_messages != []:
                 print(f"[Execute #{self.execute_nb}] Attempt #{attempts + 1}: Invalid messages detected: {invalid_messages}")
-                if attempts == max_attempts:
-                    raise Exception("Invalid messages after maximum attempts.")
-                else:
-                    LLM_response = self.run_model(self.prompt)
-                    self.round_invalid_messages.append(invalid_messages)
-                    attempts += 1
+                self.round_invalid_messages.append(invalid_messages)
+                attempts += 1
+                if attempts >= max_attempts:
+                    raise AgentExecutionError(
+                        f"Agent {self.hierarchy.id} failed to produce valid output after {max_attempts} attempts. "
+                        f"Last errors: {invalid_messages}"
+                    )
+                LLM_response = self.run_model(self.prompt)
             else:
-                # Synchronize data based on parsed JSON
                 self.invalid_messages_history.append(self.round_invalid_messages)
                 self.round_invalid_messages = []
-                
+
                 sync_results = self.parsed_data_sync(extracted_json)
-                
+
                 return {
                     "success": True,
                     "sync_results": sync_results,
                     "attempts": attempts,
                     "invalid_messages": invalid_messages
                 }
-        return
+        raise AgentExecutionError(f"Agent {self.hierarchy.id} exhausted retry loop without returning.")
 
     def execute_WithGpt4V(self):
         print(self.log_folder_name)
@@ -577,9 +595,9 @@ class Detachment_Agent(BasicAgent):
         max_attempts = 5
         attempts = 0
 
-        # 更新执行次数
+        # update execution count
         self.hierarchy.target_agent_id = ""
-        
+
         self.execute_nb += 1
         plot_tactical_positions(self.profile.CurrentBattlefieldSituation, img_save_path = f"{self.log_folder_name}", img_name = f"{self.profile.identity}_{self.hierarchy.id}_{self.execute_nb}")
 

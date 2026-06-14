@@ -1,8 +1,6 @@
-from typing import overload
+from typing import Dict
 
-from procoder.utils.my_typing import *
-
-from .base import TS, Module, T, as_module
+from .base import Module, T, as_module
 
 
 class AddIndentProxy(Module):

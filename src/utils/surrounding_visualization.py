@@ -1,9 +1,6 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import matplotlib.colors as mcolors 
-import matplotlib.cm as cm
 
 def polar_to_cartesian(distance, bearing):
     radians = np.deg2rad(bearing)
@@ -33,11 +30,11 @@ def plot_tactical_positions(data, img_save_path = "logs", img_name = "tactical_p
         plt.plot(friendly_cartesian_positions[:, 0], friendly_cartesian_positions[:, 1], 'go', label='Friendly Positions')
         for i, (x, y) in enumerate(friendly_cartesian_positions, start=1):
             # plt.text(x, y, f'Friendly {i}', horizontalalignment='right')
-            plt.text(x, y, f'', horizontalalignment='right')
+            plt.text(x, y, '', horizontalalignment='right')
     if len(enemy_cartesian_positions) > 0:
         plt.plot(enemy_cartesian_positions[:, 0], enemy_cartesian_positions[:, 1], 'ro', label='Enemy Positions')
         for i, (x, y) in enumerate(enemy_cartesian_positions, start=1):
-            plt.text(x, y, f'', horizontalalignment='right')
+            plt.text(x, y, '', horizontalalignment='right')
     plt.xlabel('X Position')
     plt.ylabel('Y Position')
     plt.title('Tactical Positioning with Friendly and Enemy Forces')

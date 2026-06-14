@@ -1,7 +1,7 @@
 import collections
 
 import roman
-from procoder.utils.my_typing import *
+from typing import Callable
 
 # from .base import Module, T, TS, as_module
 

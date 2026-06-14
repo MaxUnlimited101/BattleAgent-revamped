@@ -1,6 +1,6 @@
 from .base import TS
-from .sequential import Sequential, number_indexing
-from .utils import make_ordered_dict
+from .sequential import Sequential
+from .utils import make_ordered_dict, number_indexing
 
 
 class Paired(Sequential):

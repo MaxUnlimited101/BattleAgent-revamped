@@ -240,7 +240,12 @@ class Detachment_Agent(BasicAgent):
         
         self.action_restrictions_require = False
         self.mergedOrPruned = False
-        
+
+        # Phase 4 perf/cost knobs
+        self.history_window = 3       # last-K extracted JSON decisions in the prompt; <=0 = full raw history
+        self.prompt_caching = False   # send the static prefix as a separate cache_control block (Claude)
+        self._static_prefix_cache = None
+
         self.log_folder_name = ""
 
     def __eq__(self, other):
@@ -311,51 +316,84 @@ class Detachment_Agent(BasicAgent):
         return invalid_messages
 
     
-    def construct_prompt(self):
+    def _static_prefix(self):
+        """The invariant leading block of the prompt (battle lore, army, action space, json
+        contract, mission, map). Has no per-step interpolation, so it is rendered once and
+        memoized — this is also the contiguous prefix marked for Anthropic prompt caching.
+
+        Note: System_Setting (round number), RoleSetting (position/sub-agents) and
+        TroopInformation (troop counts) interpolate per-step state, so they live in the
+        dynamic suffix, not here.
+        """
+        if self._static_prefix_cache is not None:
+            return self._static_prefix_cache
+
         actions_text = self.generate_action_list()
+        prefix = format_prompt(
+            Sequential(
+                self.profile.history_setting,
+                self.profile.army_setting,
+                self.profile.action_instruction_block,
+                self.profile.json_constraint_variable,
+            ).set_sep("\n\n").set_indexing_method(sharp2_indexing),
+            {"profile": self.profile, "hierarchy": self.hierarchy},
+        )
+        prefix += "\n\n" + "## initial mission\n" + "initial mission refers to the first task or objective assigned to the country_E Commander at the start of the game.\n" + self.profile.initial_mission
+        prefix += "\n\n" + f"## battle field infomation\n This JSON data describes a map of Battle field.  It includes geographic features, military movements, and other relevant details.\n {self.profile.map_info_json}. The map's dimensions range from -1000 to +1000. Going beyond this range (leaving the map's boundaries) is considered a defeat of this agent."
+        prefix += "\n\n" + "## Action Space\n" + "In this simulation, you can use the following actions.\n" + actions_text
 
-        battle_prompt = format_prompt(
-        Sequential(
-            self.profile.System_Setting, 
-            self.profile.history_setting,
-            # army profile
-            self.profile.army_setting,
-            self.profile.RoleSetting,
-            self.profile.TroopInformation,
-            
-            # self.profile.action_list,
-            self.profile.action_instruction_block,
-            self.profile.json_constraint_variable,
-            
-            # current situation
-            
-        ).set_sep("\n\n").set_indexing_method(sharp2_indexing), {"profile":self.profile,"hierarchy" : self.hierarchy})
-        
-        battle_prompt += "\n\n" + "## initial mission\n" + "initial mission refers to the first task or objective assigned to the country_E Commander at the start of the game.\n" + self.profile.initial_mission
-        battle_prompt += "\n\n" + f"## battle field infomation\n This JSON data describes a map of Battle field.  It includes geographic features, military movements, and other relevant details.\n {self.profile.map_info_json}. The map's dimensions range from -1000 to +1000. Going beyond this range (leaving the map's boundaries) is considered a defeat of this agent."  
+        self._static_prefix_cache = prefix
+        return prefix
 
-        battle_prompt += "\n\n" + "## Action Space\n" + "In this simulation, you can use the following actions.\n" + actions_text
-        # battle_prompt +=  "\n\n" + self.profile.json_example_text
-        
+    def _history_text(self):
+        """Returns the history block content, truncated to the last ``history_window`` decisions.
+
+        ``history_window > 0`` -> the last K parsed JSON decisions (compact). ``<= 0`` -> the
+        legacy full raw-response dump. Full history is always retained in
+        ``self.LLM_response_history`` regardless.
+        """
+        if self.history_window and self.history_window > 0:
+            recent = sorted(self.extracted_json_history.items())[-self.history_window:]
+            return json.dumps({str(nb): decision for nb, decision in recent})
+        return f"{self.LLM_response_history}"
+
+    def _dynamic_suffix(self):
+        """The per-step portion of the prompt: framing/role/troop state plus the live
+        battlefield situation, retry feedback and truncated history."""
+        suffix = format_prompt(
+            Sequential(
+                self.profile.System_Setting,
+                self.profile.RoleSetting,
+                self.profile.TroopInformation,
+            ).set_sep("\n\n").set_indexing_method(sharp2_indexing),
+            {"profile": self.profile, "hierarchy": self.hierarchy},
+        )
+
         ## assemble the invalid messages
         flat_invalid_messages = [message for sublist in self.round_invalid_messages for message in sublist]
         invalid_messages_str = "\n".join(flat_invalid_messages)
-        battle_prompt += "\n\n" + invalid_messages_str
-        
-        battle_prompt += "\n\n" + "## History Action Plan\n" + f"This is all of your analysis and planning from previous rounds. It will assist you in determining the stage of the war, helping you make significant decisions.\n {self.LLM_response_history}" 
-        
-        
-        battle_prompt += "\n\n" + "## Current Battlefield Situation\n" + f"This is what's happening around you. You can discern the number of enemies and allies, as well as their current actions, within a certain range.\n {self.profile.CurrentBattlefieldSituation}" 
-        
-        battle_prompt += "\n\n" + "War is on the verge of breaking out. To initiate an attack on the enemy, based on the speed you've estimated, you and your deployed sub-agents will advance towards the enemy, navigating by the coordinates."
-        
-        if self.action_restrictions_require:
-            battle_prompt += "\n\n" + "## Restriction on Sub-Agent Deployment\n" + "Limitation: Due to previous extensive deployment of sub-agents, your current strategy must be confined to your main force, requiring the 'actions' array in the output JSON to include only one action specifically for your command. This constraint prohibits dispatching subsidiary agents and ensures a singular, focused action directive."
-        
-        battle_prompt += "\n\n" + self.additional_prompt
+        suffix += "\n\n" + invalid_messages_str
 
-        print("--------------")
-        return battle_prompt
+        suffix += "\n\n" + "## History Action Plan\n" + f"This is your analysis and planning from previous rounds. It will assist you in determining the stage of the war, helping you make significant decisions.\n {self._history_text()}"
+
+        suffix += "\n\n" + "## Current Battlefield Situation\n" + f"This is what's happening around you. You can discern the number of enemies and allies, as well as their current actions, within a certain range.\n {self.profile.CurrentBattlefieldSituation}"
+
+        suffix += "\n\n" + "War is on the verge of breaking out. To initiate an attack on the enemy, based on the speed you've estimated, you and your deployed sub-agents will advance towards the enemy, navigating by the coordinates."
+
+        if self.action_restrictions_require:
+            suffix += "\n\n" + "## Restriction on Sub-Agent Deployment\n" + "Limitation: Due to previous extensive deployment of sub-agents, your current strategy must be confined to your main force, requiring the 'actions' array in the output JSON to include only one action specifically for your command. This constraint prohibits dispatching subsidiary agents and ensures a singular, focused action directive."
+
+        suffix += "\n\n" + self.additional_prompt
+        return suffix
+
+    def prompt_parts(self):
+        """Returns (static_prefix, dynamic_suffix). Callers that batch or cache use these
+        separately; ``construct_prompt`` joins them for the plain string path."""
+        return self._static_prefix(), self._dynamic_suffix()
+
+    def construct_prompt(self):
+        prefix, suffix = self.prompt_parts()
+        return prefix + "\n\n" + suffix
 
     
 
@@ -458,6 +496,8 @@ class Detachment_Agent(BasicAgent):
         new_sub_agent.log_folder_name = self.log_folder_name
         new_sub_agent.parser_mode = self.parser_mode
         new_sub_agent.token_accumulator = self.token_accumulator
+        new_sub_agent.history_window = self.history_window
+        new_sub_agent.prompt_caching = self.prompt_caching
 
         # Add the new sub-agent to the current hierarchy
         self.hierarchy.add_sub_agent(new_sub_agent)
@@ -529,6 +569,15 @@ class Detachment_Agent(BasicAgent):
         return attributes, text_msg
 
     
+    def _invoke_decision(self):
+        """Issue one commander decision call. With prompt caching enabled the static prefix is
+        sent as a separate cache_control block; otherwise the plain run_model path is used (which
+        tests monkeypatch)."""
+        if self.prompt_caching:
+            prefix, suffix = self.prompt_parts()
+            return run_LLM(self.model_type, suffix, self.token_accumulator, "commander", cache_prefix=prefix)
+        return self.run_model(self.prompt)
+
     def execute(self, LLM_response=None):
         max_attempts = 3
         attempts = 0
@@ -539,7 +588,7 @@ class Detachment_Agent(BasicAgent):
         self.execute_nb += 1
 
         if LLM_response in [None, ""]:
-            LLM_response = self.run_model(self.prompt)
+            LLM_response = self._invoke_decision()
 
 
         # record LLM response history
@@ -574,7 +623,7 @@ class Detachment_Agent(BasicAgent):
                         f"Agent {self.hierarchy.id} failed to produce valid output after {max_attempts} attempts. "
                         f"Last errors: {invalid_messages}"
                     )
-                LLM_response = self.run_model(self.prompt)
+                LLM_response = self._invoke_decision()
             else:
                 self.invalid_messages_history.append(self.round_invalid_messages)
                 self.round_invalid_messages = []

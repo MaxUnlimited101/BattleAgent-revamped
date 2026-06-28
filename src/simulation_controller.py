@@ -110,6 +110,10 @@ if __name__ == '__main__':
     parser.add_argument('--vision_range', type=int, default=100000, help='Fog-of-war radius in map units (default 100000 = omniscient)')
     parser.add_argument('--on_agent_error', type=str, choices=['continue', 'abort'], default='continue', help='What to do when an agent raises AgentExecutionError')
     parser.add_argument('--parser', type=str, choices=['legacy', 'structured'], default='legacy', help='JSON validation mode: legacy=manual checks, structured=Pydantic models')
+    parser.add_argument('--execution-mode', dest='execution_mode', type=str, choices=['sequential', 'parallel'], default='sequential', help='sequential=one agent at a time; parallel=batch commander decisions per step')
+    parser.add_argument('--max-concurrency', dest='max_concurrency', type=int, default=8, help='Max concurrent LLM calls per batch (parallel mode and diary batching)')
+    parser.add_argument('--history-window', dest='history_window', type=int, default=3, help='Last-K parsed JSON decisions kept in the commander prompt; <=0 = full raw history')
+    parser.add_argument('--prompt-caching', dest='prompt_caching', action='store_true', help='Send the static prompt prefix as a cache_control block (Anthropic prompt caching)')
     parser.add_argument('--commander_model', type=str, choices=["claude", "gpt", "openrouter", "ollama", "fake"], default=None, help='LLM for commander agents (defaults to --LLM_MODEL)')
     parser.add_argument('--referee_model', type=str, choices=["claude", "gpt", "openrouter", "ollama", "fake"], default=None, help='LLM for referee (defaults to --LLM_MODEL)')
     parser.add_argument('--diary_model', type=str, choices=["claude", "gpt", "openrouter", "ollama", "fake"], default=None, help='LLM for diary soldiers (defaults to --LLM_MODEL)')
@@ -187,6 +191,9 @@ if __name__ == '__main__':
     country_F_agent_root = Detachment_Agent(commander_model, country_F_agent_profile, country_F_agent_hierarchy)
     country_E_agent_root.parser_mode = parser_mode
     country_F_agent_root.parser_mode = parser_mode
+    for root in (country_E_agent_root, country_F_agent_root):
+        root.history_window = args.history_window
+        root.prompt_caching = args.prompt_caching
 
     country_E_agent_hierarchy.parent_agent = country_E_agent_root
     country_F_agent_hierarchy.parent_agent = country_F_agent_root
@@ -201,5 +208,10 @@ if __name__ == '__main__':
     sandbox.LLM_MODEL = LLM_MODEL
     sandbox.vision_range = vision_range
     sandbox.on_agent_error = on_agent_error
-    
+    sandbox.execution_mode = args.execution_mode
+    sandbox.max_concurrency = args.max_concurrency
+
+    if args.execution_mode == "parallel" and GPT4V:
+        print("WARNING: parallel execution mode is incompatible with GPT4V; falling back to sequential.")
+
     simulation_results = sandbox.simulate(simulation_time, update_interval)

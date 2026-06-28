@@ -7,7 +7,7 @@ current_file_path = os.path.abspath(__file__)
 parent_directory = os.path.dirname(os.path.dirname(current_file_path))
 sys.path.append(parent_directory)
 
-from utils.LLM_api import run_LLM
+from utils.LLM_api import run_LLM, run_LLM_batch
 
 
 country_E_profile_1 = {
@@ -542,6 +542,18 @@ class Soldier_Profile:
         journal = self.run_model(current_prompt)
         return journal
 
+    @staticmethod
+    def generate_journal_batch(soldier_profiles, prompts, accumulator=None, max_concurrency=8):
+        """Batch journal generation for many soldiers in one concurrent fan-out.
+
+        ``soldier_profiles`` and ``prompts`` are parallel lists; returns journals in order.
+        Token usage is bucketed under the "diary" role on ``accumulator``. All soldiers share
+        the same ``model_type`` (diary model), so a single batch call suffices."""
+        if not prompts:
+            return []
+        model_type = soldier_profiles[0].model_type
+        return run_LLM_batch(model_type, prompts, accumulator, "diary", max_concurrency)
+
     def collect_journal(self, time, journal):
         self.journal[time] = journal
 
@@ -564,7 +576,10 @@ class Soldier_Agent():
         self.profile = profile
         self.hierarchy = hierarchy
         
-    def execute(self, executed_troop, command, surrounding, time):
+    def prepare(self, executed_troop, command, surrounding):
+        """Apply structure-change/transfer logic (mutates hierarchy, must stay sequential) and
+        return the constructed journal prompt. Split out from ``execute`` so callers can batch
+        the LLM journal generation across many soldiers."""
         # detect and obtain structural changes
         new_detached_troop_list = self.hierarchy.monitor_structure_change(executed_troop)
 
@@ -580,11 +595,16 @@ class Soldier_Agent():
                 # also update the hierarchy structure
                 self.hierarchy.sub_troop = decision.hierarchy.sub_agents
 
-        # build prompt, generate and collect journal
-        current_prompt = self.profile.construct_prompt(command, surrounding)
-        journal_entity = self.profile.generate_journal(current_prompt)
+        return self.profile.construct_prompt(command, surrounding)
 
+    def collect(self, time, journal_entity):
         self.profile.collect_journal(time, journal_entity)
+
+    def execute(self, executed_troop, command, surrounding, time):
+        # build prompt, generate and collect journal
+        current_prompt = self.prepare(executed_troop, command, surrounding)
+        journal_entity = self.profile.generate_journal(current_prompt)
+        self.collect(time, journal_entity)
 
         # more logic can be added here, such as making further decisions based on journal results
         

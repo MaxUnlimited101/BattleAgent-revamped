@@ -2,6 +2,7 @@
 import os
 import pickle
 import random
+import time
 import traceback
 from datetime import datetime, timedelta
 from tqdm import tqdm
@@ -117,6 +118,10 @@ class Sandbox:
         self.vision_range = 100000
         self.on_agent_error = "continue"
 
+        # Phase 4 perf/cost
+        self.execution_mode = "sequential"   # "sequential" | "parallel" (batch commander decisions per step)
+        self.max_concurrency = 8
+
         self.subAgentNBThreshold = subAgentNBThreshold
 
         self.action_interact_evaluation = Action_Interact_Evaluation(self.model_type, self.shuffled_agent_list, self.country_E_agent_list, self.country_F_agent_list, self.map_info_json)
@@ -209,12 +214,157 @@ class Sandbox:
         message = self.action_interact_evaluation.single_agent_evaluate(agent)
         if message!=None:
             self.battle_logger.log_action("Action Interaction Evaluation", message, self.system_time)
-                        
+
+    def _prep_agent(self, agent, step, step_minutes):
+        """Start-of-turn state sync for one agent. Returns the agent's vision info, or None if
+        the agent should be skipped this step (merged/pruned, wiped out, or already defeated)."""
+        if agent.mergedOrPruned or agent.profile.remaining_num_of_troops <= 0:
+            return None
+        if agent.profile.current_stage in ["Crushing Defeat", "fleeing Off the Map"]:
+            return None
+
+        agent.action_restrictions_require = len(agent.hierarchy.sub_agents) >= self.subAgentNBThreshold
+
+        vision_info = self.my_vision_decoder(agent)
+        agent.profile.CurrentBattlefieldSituation = vision_info
+
+        # sandbox-agent sync
+        agent.profile.agent_clock = self.system_time
+        agent.profile.round_nb = step
+        agent.profile.round_interval = step_minutes
+        return vision_info
+
+    def _run_diaries(self, soldier_agents_list, agent, vision_info):
+        """Generate journals for all of an agent's soldiers in a single batched LLM fan-out.
+        Journals are independent, so batching is purely a throughput/cost win (no semantic change)."""
+        soldiers, prompts = [], []
+        for soldier_agent in soldier_agents_list:
+            prompts.append(soldier_agent.prepare(agent, agent.profile.current_action, vision_info))
+            soldiers.append(soldier_agent)
+        if not soldiers:
+            return
+        profiles = [s.profile for s in soldiers]
+        journals = soldiers[0].profile.generate_journal_batch(
+            profiles, prompts, self.token_accumulator, self.max_concurrency
+        )
+        for diary_index, (soldier_agent, journal) in enumerate(zip(soldiers, journals)):
+            soldier_agent.collect(self.system_time, journal)
+            print(f"diary {diary_index} has been collected")
+            print("--------------")
+            self.battle_logger.log_action("diary", f"diary {diary_index} has been collected", self.system_time)
+
+    def _post_decision(self, agent, vision_info, step_results):
+        """Work that follows an agent's decision: refresh agent lists, run the referee on the
+        agent and any newborn sub-agents, collect diaries, and log. Shared by both execution modes."""
+        self.update_agent_list_after_execution(agent)
+
+        if agent.profile.identity == self.country_E_agent_root.profile.identity:
+            collector = self.country_E_collector
+        else:
+            collector = self.country_F_collector
+
+        self.run_referee_and_log(agent)
+        for sub_agent in agent.hierarchy.sub_agents:
+            if sub_agent.new_born:
+                self.run_referee_and_log(sub_agent)
+                sub_agent.new_born = False
+
+        soldier_agents_list = collector.get_soldiers(agent)
+        if self.have_diaries:
+            self._run_diaries(soldier_agents_list, agent, vision_info)
+
+        # Collect agent-specific logs
+        agent_logs, text_msg = agent.get_logged_attributions()
+        log_content = text_msg  # + str(agent_logs)
+        self.battle_logger.log_action(f"{agent.profile.identity} {agent.hierarchy.id} executed {agent.profile.current_action}", log_content, self.system_time)
+
+        step_results["agent_states"].append({"agent_id": agent.hierarchy.id})
+
+    def _run_step_sequential(self, shuffled_list, step, step_minutes, step_results):
+        """Decide + resolve one agent at a time (original behavior). Returns # of agent failures."""
+        failed = 0
+        for agent in tqdm(shuffled_list):
+            print(f"current agent list length: {len(self.country_E_agent_list) + len(self.country_F_agent_list)}")
+            try:
+                vision_info = self._prep_agent(agent, step, step_minutes)
+                if vision_info is None:
+                    continue
+                if self.GPT4V:
+                    agent.execute_WithGpt4V()
+                else:
+                    agent.execute()
+                self._post_decision(agent, vision_info, step_results)
+            except AgentExecutionError as e:
+                failed += 1
+                error_msg = f"AgentExecutionError for agent {agent.hierarchy.id} at step {step + 1}: {e}"
+                self.battle_logger.log_action("AgentExecutionError", error_msg, self.system_time)
+                if self.on_agent_error == "abort":
+                    raise
+            except Exception as e:
+                error_msg = f"Unexpected error with agent {agent.hierarchy.id} at step {step + 1}: {e}"
+                self.battle_logger.log_action("UnexpectedError", f"{error_msg}\n{traceback.format_exc()}", self.system_time)
+                raise
+        return failed
+
+    def _run_step_parallel(self, shuffled_list, step, step_minutes, step_results):
+        """Batch all commander decisions for the step in one concurrent fan-out, then resolve
+        syncs sequentially in the same agent order. Decisions are made against start-of-step
+        state (agents don't see earlier same-step moves) — hence opt-in via --execution-mode."""
+        from utils.LLM_api import run_LLM_batch
+
+        # Prep pass: compute vision/state and build each agent's prompt. With caching on, keep
+        # each agent's static prefix separate (per-agent, since opposing armies differ); without
+        # caching, fold prefix+suffix into a single string.
+        prepared = []          # (agent, vision_info)
+        prompts = []           # batched prompt body per agent
+        cache_prefixes = []    # per-agent cache prefix (or None), parallel to prompts
+        for agent in shuffled_list:
+            vision_info = self._prep_agent(agent, step, step_minutes)
+            if vision_info is None:
+                continue
+            prefix, suffix = agent.prompt_parts()
+            if agent.prompt_caching:
+                prompts.append(suffix)
+                cache_prefixes.append(prefix)
+            else:
+                prompts.append(prefix + "\n\n" + suffix)
+                cache_prefixes.append(None)
+            prepared.append((agent, vision_info))
+
+        if not prepared:
+            return 0
+
+        # Batch the commander calls (all roots/sub-agents share the commander model_type).
+        commander_model = prepared[0][0].model_type
+        responses = run_LLM_batch(
+            commander_model, prompts, self.token_accumulator, "commander",
+            self.max_concurrency, cache_prefix=cache_prefixes,
+        )
+
+        # Sync pass: feed each response back through execute(), then resolve post-decision work.
+        failed = 0
+        for (agent, vision_info), response in zip(tqdm(prepared), responses):
+            try:
+                agent.execute(LLM_response=response)
+                self._post_decision(agent, vision_info, step_results)
+            except AgentExecutionError as e:
+                failed += 1
+                error_msg = f"AgentExecutionError for agent {agent.hierarchy.id} at step {step + 1}: {e}"
+                self.battle_logger.log_action("AgentExecutionError", error_msg, self.system_time)
+                if self.on_agent_error == "abort":
+                    raise
+            except Exception as e:
+                error_msg = f"Unexpected error with agent {agent.hierarchy.id} at step {step + 1}: {e}"
+                self.battle_logger.log_action("UnexpectedError", f"{error_msg}\n{traceback.format_exc()}", self.system_time)
+                raise
+        return failed
+
     def simulate(self, total_minutes, step_minutes):
 
         results = []
         steps = total_minutes // step_minutes
         failed_agent_count = 0
+        step_timings = []
 
         self.update_all_agent_lists()
         
@@ -237,90 +387,21 @@ class Sandbox:
                 "agent_states": []
             }
 
-            # for agent in self.shuffled_agent_list:
+            step_start = time.perf_counter()
+            tokens_before = self.token_accumulator.total_input + self.token_accumulator.total_output
+
+            # Snapshot the per-step roster once (shuffled_agent_list re-shuffles on every access).
             shuffled_list = self.shuffled_agent_list
-            for agent in tqdm(shuffled_list):
-                diary_index = 0
-                print(f"current agent list length: {len(self.shuffled_agent_list)}")
-                
-                if agent.mergedOrPruned == True:
-                    continue
-                
-                if agent.profile.remaining_num_of_troops <= 0:
-                    continue
-                
-                try:
-                    if agent.profile.current_stage not in ["Crushing Defeat", "fleeing Off the Map"]: 
-                        
-                        if len(agent.hierarchy.sub_agents) < self.subAgentNBThreshold:
-                            agent.action_restrictions_require = False
-                        else:
-                            agent.action_restrictions_require = True
-                            
-                        
-                        vision_info = self.my_vision_decoder(agent)
-                        # print(f"vision_info:{vision_info}")
-                        agent.profile.CurrentBattlefieldSituation = vision_info
-                        
-                        #sandbox-agent sync
-                        agent.profile.agent_clock = self.system_time  # Update agent clock
-                        agent.profile.round_nb = step
-                        agent.profile.round_interval = step_minutes
-                        
-                        if self.GPT4V:
-                            agent.execute_WithGpt4V()    
-                        else:
-                            agent.execute()  
-                        
-                        self.update_agent_list_after_execution(agent)
-                        
-                        if agent.profile.identity == self.country_E_agent_root.profile.identity: #["country_E"]:
-                            collector = self.country_E_collector
-                            # same_identity_agent_list = self.country_E_agent_list
-                        else:
-                            collector = self.country_F_collector
-                            # same_identity_agent_list = self.country_F_agent_list
-                        
-                        # MergeFunc(agent)
-                        
-                        self.run_referee_and_log(agent)
-                        for sub_agent in agent.hierarchy.sub_agents:
-                            if sub_agent.new_born:
-                                self.run_referee_and_log(sub_agent)
-                                sub_agent.new_born = False
 
-                        soldier_agents_list = collector.get_soldiers(agent)
-                        if self.have_diaries:
-                            for soldier_agent in soldier_agents_list:
-                                soldier_agent.execute(agent, agent.profile.current_action, vision_info, self.system_time)
-                                print(f"diary {diary_index} has been collected")
-                                print("--------------")
-                                diary_index += 1
-                                self.battle_logger.log_action("diary", f"diary {diary_index} has been collected", self.system_time)
+            if self.execution_mode == "parallel" and not self.GPT4V:
+                failed_agent_count += self._run_step_parallel(shuffled_list, step, step_minutes, step_results)
+            else:
+                failed_agent_count += self._run_step_sequential(shuffled_list, step, step_minutes, step_results)
 
-                        # Collect agent-specific logs
-                        agent_logs, text_msg = agent.get_logged_attributions()
-                        
-                        log_content = text_msg #+ str(agent_logs)
-                        self.battle_logger.log_action(f"{agent.profile.identity} {agent.hierarchy.id} executed {agent.profile.current_action}", log_content, self.system_time)
+            step_wall = time.perf_counter() - step_start
+            step_tokens = (self.token_accumulator.total_input + self.token_accumulator.total_output) - tokens_before
+            step_timings.append(step_wall)
 
-                        # Collect agent states and actions
-                        step_results["agent_states"].append({
-                            "agent_id": agent.hierarchy.id, 
-                            # "state": agent.state
-                        })
-
-                except AgentExecutionError as e:
-                    failed_agent_count += 1
-                    error_msg = f"AgentExecutionError for agent {agent.hierarchy.id} at step {step + 1}: {e}"
-                    self.battle_logger.log_action("AgentExecutionError", error_msg, self.system_time)
-                    if self.on_agent_error == "abort":
-                        raise
-                except Exception as e:
-                    error_msg = f"Unexpected error with agent {agent.hierarchy.id} at step {step + 1}: {e}"
-                    self.battle_logger.log_action("UnexpectedError", f"{error_msg}\n{traceback.format_exc()}", self.system_time)
-                    raise
-            
             country_F_war_situation, country_F_decision = ceasefire_decision_maker(self.country_F_agent_root)
             country_E_war_situation, country_E_decision = ceasefire_decision_maker(self.country_E_agent_root)
 
@@ -346,6 +427,8 @@ class Sandbox:
             results.append(step_results)
 
             self.battle_logger.log_action("TokenUsage", str(self.token_accumulator.summary_dict()), self.system_time)
+            self.battle_logger.log_action("StepTiming", f"Step {step + 1}: {step_wall:.2f}s wall, mode={self.execution_mode}", self.system_time)
+            self.battle_logger.log_action("StepTokens", f"Step {step + 1}: {step_tokens} tokens (in+out) this step", self.system_time)
             self.battle_logger.log_action("Simulation step completed", f"Step {step + 1}", self.system_time)
             self.battle_logger.log_tree(self.country_E_agent_root, "country_E", self.system_time)
             self.battle_logger.log_tree(self.country_F_agent_root, "country_F", self.system_time)
@@ -359,9 +442,17 @@ class Sandbox:
         cost_str = f" | Estimated cost: ${cost:.4f}" if cost is not None else ""
         self.battle_logger.log_action("FinalTokenSummary", token_summary + cost_str, self.system_time)
 
+        ran_steps = len(step_timings)
+        total_wall = sum(step_timings)
+        mean_wall = total_wall / ran_steps if ran_steps else 0.0
+        total_tokens = self.token_accumulator.total_input + self.token_accumulator.total_output
+        mean_tokens = total_tokens / ran_steps if ran_steps else 0.0
         summary = (
-            f"Run complete: {steps} steps, {failed_agent_count} agent execution failures, "
-            f"{skipped_rounds} casualty rounds skipped."
+            f"Run complete: {ran_steps} steps, {failed_agent_count} agent execution failures, "
+            f"{skipped_rounds} casualty rounds skipped. "
+            f"Execution mode: {self.execution_mode}. "
+            f"Wall-time: {total_wall:.2f}s total, {mean_wall:.2f}s/step. "
+            f"Tokens: {total_tokens} total, {mean_tokens:.0f}/step."
         )
         print(summary)
         self.battle_logger.log_action("RunSummary", summary, self.system_time)

@@ -1,4 +1,7 @@
+import logging
 import random
+
+logger = logging.getLogger(__name__)
 
 injuries_info = {
     "Sword and Knife Wounds": {
@@ -68,10 +71,11 @@ def injury_generator(history, injury_sentences=injury_sentences, injury_chance=0
         return ""
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     # Initialize an empty history list
     injury_history = []
 
     # Example usage of the function
     selected_injury_example = injury_generator(injury_history, injury_sentences, 0.9)
-    print(selected_injury_example)
-    print(type(selected_injury_example))
+    logger.info("%s", selected_injury_example)
+    logger.info("%s", type(selected_injury_example))

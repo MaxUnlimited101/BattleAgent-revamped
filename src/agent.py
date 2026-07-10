@@ -1,7 +1,8 @@
 # Standard library imports
 import json5 as json
+import logging
 import pickle
-import uuid
+import itertools
 from abc import ABC, abstractmethod
 
 
@@ -14,6 +15,23 @@ from procoder.prompt import Sequential, sharp2_indexing
 from utils.LLM_api import run_LLM
 from utils.VLM_api import run_gpt4v
 from utils.surrounding_visualization import plot_tactical_positions
+
+logger = logging.getLogger(__name__)
+
+# Deterministic agent-id generation (replaces uuid4 for reproducibility). Ids are assigned in
+# creation order; identical inputs produce identical ids. Reset between runs/tests via reset_agent_ids().
+_agent_id_counter = itertools.count(1)
+
+
+def reset_agent_ids():
+    """Reset the monotonic agent-id counter (call at the start of a run or test for reproducibility)."""
+    global _agent_id_counter
+    _agent_id_counter = itertools.count(1)
+
+
+def next_agent_id():
+    return f"ARMY-{next(_agent_id_counter):04d}"
+
 
 class AgentExecutionError(Exception):
     """Raised when an agent fails to produce valid output after max retry attempts."""
@@ -28,6 +46,9 @@ class BasicAgent(ABC):
         self.history = []
         self.parser_mode = "legacy"
         self.token_accumulator = None
+        # Set by the sandbox each step so parsed_data_sync can emit structured events (optional).
+        self.event_logger = None
+        self.current_step = None
         
     @abstractmethod
     def construct_prompt(self):
@@ -55,7 +76,7 @@ class BasicAgent(ABC):
 
 
 def BranchStreamlining(agent, target_agent_id):
-    print("doing the BranchStreamlining")
+    logger.info("doing the BranchStreamlining")
     sub_agent_entity = None
     for sub_agent in agent.hierarchy.sub_agents:
         if sub_agent.hierarchy.id == target_agent_id:
@@ -127,7 +148,8 @@ class ConstantPromptConfig:
 
 
 class Detachment_AgentProfile:
-    def __init__(self, identity, position, original_num_of_troops, initial_mission = "win the battles",  constant_prompt_config = None):
+    def __init__(self, identity, position, original_num_of_troops, initial_mission = "win the battles",  constant_prompt_config = None,
+                 max_deploy_percent=0.6, crushing_defeat_remaining_frac=0.1, crushing_defeat_lost_frac=0.5, round_interval=15):
         ### Army Information
         self.identity = identity
         self.position = position
@@ -153,15 +175,18 @@ class Detachment_AgentProfile:
         self.initial_mission = initial_mission
         
         ###
-        self.max_deploy_percent = 0.6
-        self.prompt_max_deploy_percent = self.max_deploy_percent * 100 
+        self.max_deploy_percent = max_deploy_percent
+        self.prompt_max_deploy_percent = self.max_deploy_percent * 100
         self.prompt_max_deploy_nb = int(self.original_num_of_troops * self.max_deploy_percent)
-        
+        # Defeat thresholds (previously hardcoded 0.1 / 0.5 in parsed_data_sync).
+        self.crushing_defeat_remaining_frac = crushing_defeat_remaining_frac
+        self.crushing_defeat_lost_frac = crushing_defeat_lost_frac
+
         ### system setting
         self.current_stage = "In Battle"
-        self.agent_clock = None 
+        self.agent_clock = None
         self.round_nb = None
-        self.round_interval = 15
+        self.round_interval = round_interval
         self.CurrentBattlefieldSituation = ""
         
         self.history_board = {}
@@ -193,8 +218,7 @@ class Detachment_AgentProfile:
 
 class Detachment_AgentHierarchy:
     def __init__(self, level, parent_agent=None):
-        short_uuid = str(uuid.uuid4())[:8]  # take the first 8 characters of the UUID
-        self.id = f"ARMY-{short_uuid}"  # add prefix
+        self.id = next_agent_id()  # deterministic, creation-ordered id (reproducible)
         
         self.level = level
         self.parent_agent = parent_agent
@@ -421,7 +445,7 @@ class Detachment_Agent(BasicAgent):
         extracted_json = extract_json_from_text(LLM_response)
         
         if not isinstance(extracted_json, dict):
-            print(LLM_response)
+            logger.warning("Failed to extract JSON from LLM response: %s", LLM_response)
         else:
             pass
         
@@ -436,12 +460,12 @@ class Detachment_Agent(BasicAgent):
         if parsed_json["SubAgentsRecall"]:
             for recalled_agent_id in parsed_json["SubAgentsRecall"]:
                 BranchStreamlining(self, recalled_agent_id)
-                print("do the BranchStreamlining")
-                
+                logger.info("do the BranchStreamlining")
+
         if self.profile.position != parsed_json["agentNextPosition"]:
-            print(f"Moved from {self.profile.position} to {parsed_json['agentNextPosition']}")
+            logger.info("Moved from %s to %s", self.profile.position, parsed_json['agentNextPosition'])
         else:
-            print("postion no change")    
+            logger.info("position no change")
         
         if len(parsed_json['agentNextPosition']) == 2 and all(isinstance(item, int) for item in parsed_json['agentNextPosition']):
             self.profile.position = parsed_json["agentNextPosition"]
@@ -464,11 +488,23 @@ class Detachment_Agent(BasicAgent):
                     self.profile.deployed_num_of_troops += int(action['deployedNum'])
 
         # Check for other conditions like Crushing Defeat or fleeing Off the Map
-        if self.profile.remaining_num_of_troops < self.profile.original_num_of_troops * 0.1 or self.profile.lost_num_of_troops > self.profile.original_num_of_troops * 0.5:
+        if (self.profile.remaining_num_of_troops < self.profile.original_num_of_troops * self.profile.crushing_defeat_remaining_frac
+                or self.profile.lost_num_of_troops > self.profile.original_num_of_troops * self.profile.crushing_defeat_lost_frac):
             self.profile.current_stage = "Crushing Defeat"
 
         if self.profile.position[0] > 1000 or self.profile.position[1] > 1000:
             self.profile.current_stage = "fleeing Off the Map"
+
+        # Emit a structured decision event (no-op if no event logger was wired by the sandbox).
+        if self.event_logger is not None:
+            self.event_logger.decision(
+                step=self.current_step,
+                agent_id=self.hierarchy.id,
+                identity=self.profile.identity,
+                action=parsed_json.get("agentNextActionType", ""),
+                position=self.profile.position,
+                deployed=self.profile.deployed_num_of_troops,
+            )
 
         # Return the results of the synchronization
         return sync_results
@@ -480,8 +516,12 @@ class Detachment_Agent(BasicAgent):
             identity=self.profile.identity,  
             position=action['position'], 
             original_num_of_troops=int(action['deployedNum']) if action['deployedNum'] != "All available" else self.profile.remaining_num_of_troops,  # set troop count based on action
-            initial_mission=action["subAgent_NextActionType"], 
-            constant_prompt_config=self.profile.constant_prompt_config  
+            initial_mission=action["subAgent_NextActionType"],
+            constant_prompt_config=self.profile.constant_prompt_config,
+            max_deploy_percent=self.profile.max_deploy_percent,
+            crushing_defeat_remaining_frac=self.profile.crushing_defeat_remaining_frac,
+            crushing_defeat_lost_frac=self.profile.crushing_defeat_lost_frac,
+            round_interval=self.profile.round_interval,
         )
         
         # Create a new hierarchy level for the subunit
@@ -498,6 +538,8 @@ class Detachment_Agent(BasicAgent):
         new_sub_agent.token_accumulator = self.token_accumulator
         new_sub_agent.history_window = self.history_window
         new_sub_agent.prompt_caching = self.prompt_caching
+        new_sub_agent.event_logger = self.event_logger
+        new_sub_agent.current_step = self.current_step
 
         # Add the new sub-agent to the current hierarchy
         self.hierarchy.add_sub_agent(new_sub_agent)
@@ -596,7 +638,7 @@ class Detachment_Agent(BasicAgent):
         
         while attempts < max_attempts:
             extracted_json = self.parse_llm_output(LLM_response)
-            print(f"[Execute #{self.execute_nb}] Attempt #{attempts + 1}: Extracted JSON: {extracted_json}")
+            logger.debug("[Execute #%s] Attempt #%s: Extracted JSON: %s", self.execute_nb, attempts + 1, extracted_json)
             if self.parser_mode == "structured":
                 from pydantic import ValidationError
                 from schemas import CommanderDecision
@@ -610,12 +652,10 @@ class Detachment_Agent(BasicAgent):
             else:
                 invalid_messages = self.validate_parsed_output(extracted_json)
 
-            print("--------------")
-
             self.extracted_json_history[self.execute_nb] = extracted_json
 
             if invalid_messages != []:
-                print(f"[Execute #{self.execute_nb}] Attempt #{attempts + 1}: Invalid messages detected: {invalid_messages}")
+                logger.warning("[Execute #%s] Attempt #%s: Invalid messages detected: %s", self.execute_nb, attempts + 1, invalid_messages)
                 self.round_invalid_messages.append(invalid_messages)
                 attempts += 1
                 if attempts >= max_attempts:
@@ -639,7 +679,7 @@ class Detachment_Agent(BasicAgent):
         raise AgentExecutionError(f"Agent {self.hierarchy.id} exhausted retry loop without returning.")
 
     def execute_WithGpt4V(self):
-        print(self.log_folder_name)
+        logger.info("execute_WithGpt4V log folder: %s", self.log_folder_name)
 
         max_attempts = 5
         attempts = 0
@@ -657,18 +697,17 @@ class Detachment_Agent(BasicAgent):
         
         while attempts < max_attempts:
             extracted_json = self.parse_llm_output(LLM_response)
-            print(f"[Execute #{self.execute_nb}] Attempt #{attempts + 1}: Extracted JSON: {extracted_json}")
-            print("--------------")
+            logger.debug("[Execute #%s] Attempt #%s: Extracted JSON: %s", self.execute_nb, attempts + 1, extracted_json)
 
             self.extracted_json_history[self.execute_nb] = extracted_json
 
             if "Error" in extracted_json:
                 invalid_messages = True
             else:
-                invalid_messages = False 
-            
+                invalid_messages = False
+
             if invalid_messages:
-                print(f"[Execute #{self.execute_nb}] Attempt #{attempts + 1}: Invalid messages detected: {invalid_messages}")
+                logger.warning("[Execute #%s] Attempt #%s: Invalid messages detected: %s", self.execute_nb, attempts + 1, invalid_messages)
                 if attempts == max_attempts:
                     raise Exception("Invalid messages after maximum attempts.")
                 else:

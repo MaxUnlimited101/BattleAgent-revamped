@@ -553,6 +553,6 @@ action_property_definition = {
 
 
 if __name__ == '__main__':
-    # print(action_property_definition)
-    # print(len(action_property_definition.keys()))
-    print(format_prompt(action_list,{}))
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger(__name__).info("%s", format_prompt(action_list, {}))

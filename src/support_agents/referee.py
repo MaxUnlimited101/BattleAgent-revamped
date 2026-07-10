@@ -8,19 +8,22 @@ sys.path.append(parent_directory)
 
 from utils.LLM_api import run_LLM
 import json5 as json
+import logging
+
+logger = logging.getLogger(__name__)
 
 def external_action_binding(agent, enemy_troop_list, friendly_troop_list, shuffled_agent_list):
     attacked_by_agent_list = []
     target_agent_id = agent.hierarchy.target_agent_id
-    
-    print(f"target_agent_id:{target_agent_id}")
-    print(f"enermy_list {[i.hierarchy.id for i in enemy_troop_list]}")
+
+    logger.debug("target_agent_id: %s", target_agent_id)
+    logger.debug("enemy_list %s", [i.hierarchy.id for i in enemy_troop_list])
     if target_agent_id  != None:
         attacked_agent = next((agent for agent in enemy_troop_list if agent.hierarchy.id == target_agent_id), None)
         if attacked_agent:
             attacked_by_agent_list.append(attacked_agent)
     attacker_dict = {}
-    print(f"attacked_by_agent_list:{attacked_by_agent_list}")
+    logger.debug("attacked_by_agent_list: %s", attacked_by_agent_list)
     return attacker_dict, attacked_by_agent_list
 
 def external_construct_judgment_prompt(agent, attacker_dict, attacked_by_agent_list ,  map_info):
@@ -56,10 +59,7 @@ def external_construct_judgment_prompt(agent, attacker_dict, attacked_by_agent_l
         under_attacked_agent_remaining_troops = under_attacked_agent.profile.remaining_num_of_troops 
         under_attacked_agent_info += f"""Agent {under_attacked_agent.hierarchy.id}, with {under_attacked_agent_remaining_troops} troops at coordinates {under_attacked_agent.profile.position}, is executing a "{defense_action}" for defense.\n"""
     
-    print("_______________________________")
-    print("referee prompt display:")    
-    print("agent_details:",agent_details)
-    print("attackers_info:",under_attacked_agent_info)
+    logger.debug("referee prompt display: agent_details=%s attackers_info=%s", agent_details, under_attacked_agent_info)
 
     
     # Instructions
@@ -120,6 +120,9 @@ class Action_Interact_Evaluation:
 
         self.prompt_history = []
         self.skipped_casualty_rounds = 0
+        # Set by the sandbox for the structured event stream (optional).
+        self.event_logger = None
+        self.current_step = None
     def para_update(self, shuffled_agent_list, country_E_agent_list, country_F_agent_list):
         self.shuffled_agent_list = shuffled_agent_list
         self.country_E_agent_list = country_E_agent_list
@@ -151,10 +154,8 @@ class Action_Interact_Evaluation:
             
             
             LLM_response = self.run_model(prompt)
-            
-            print("============================")
-            print(LLM_response)
-            print("============================")
+
+            logger.debug("referee LLM response: %s", LLM_response)
 
             self.LLM_response_history.append((agent,LLM_response))
             
@@ -168,12 +169,11 @@ class Action_Interact_Evaluation:
                         break
                     attempts += 1
                 if parsed_json == {}:
-                    print(f"WARNING: referee failed to parse casualty JSON after retries for agent {agent.hierarchy.id}; skipping round.")
+                    logger.warning("referee failed to parse casualty JSON after retries for agent %s; skipping round.", agent.hierarchy.id)
                     self.skipped_casualty_rounds += 1
                     return None
 
-            print(parsed_json)
-            print("--------------")
+            logger.debug("referee parsed casualties: %s", parsed_json)
             message = self.parsed_data_sync(agent, parsed_json)
             
             self.message_list.append(message)
@@ -197,7 +197,7 @@ class Action_Interact_Evaluation:
                 parsed_json = json.loads(json_part)
                 return parsed_json
             except (ValueError, Exception) as e:
-                print(f"Error extracting or parsing JSON: {e}")
+                logger.warning("Error extracting or parsing referee JSON: %s", e)
                 return {}
 
         extracted_json = extract_json_from_text(LLM_response)
@@ -205,7 +205,7 @@ class Action_Interact_Evaluation:
         if isinstance(extracted_json, dict):
             return extracted_json
         else:
-            print("LLM response does not contain valid JSON data.")
+            logger.warning("Referee LLM response does not contain valid JSON data.")
             # You could either return an empty dict or handle this scenario explicitly in your code.
             return {}
     
@@ -232,6 +232,13 @@ class Action_Interact_Evaluation:
 
                         shuffled_agent.profile.lost_num_of_troops += total_casualties
                         message += f" {shuffled_agent.profile.identity} agent {shuffled_agent.hierarchy.id} lost {total_casualties}."
-                        break  
+                        if self.event_logger is not None:
+                            self.event_logger.casualties_assessed(
+                                step=self.current_step,
+                                agent_id=shuffled_agent.hierarchy.id,
+                                casualties=total_casualties,
+                                estimated_loss_percentage=agent_casualty_result.get("estimated_loss_percentage"),
+                            )
+                        break
 
         return message if message else "Agent ID not found or no updates made."

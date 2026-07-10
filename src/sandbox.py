@@ -1,18 +1,16 @@
 # Standard library imports
 import logging
 import os
-import pickle
 import random
 import time
 import traceback
 from datetime import datetime, timedelta
 from tqdm import tqdm
 
-# Third-party imports
-from treelib import Tree
-
 # Local application/library-specific imports
 from agent import AgentExecutionError
+from state_serialization import save_state
+from utils.battle_logger import BattleLogger
 from utils.shared_func import vision_decoder
 from utils.event_log import EventLogger
 from utils.logging_setup import configure_logging
@@ -22,74 +20,6 @@ from support_agents.referee import Action_Interact_Evaluation
 from support_agents.sim_stopper import ceasefire_decision_maker
 
 logger = logging.getLogger(__name__)
-
-
-                
-class BattleLogger:
-    def __init__(self, campaign_name):
-        self.campaign_name = campaign_name
-        self.logs = []
-        self.log_subdirectory = self._setup_logging()
-
-    def _setup_logging(self):
-        """Set up logging directories and files."""
-        real_world_time_at_creation = datetime.now().strftime('%m%d-%H%M_%S')
-        log_subdirectory = f"{real_world_time_at_creation}_{self.campaign_name}"
-
-        script_directory = os.path.dirname(os.path.realpath(__file__))
-        log_directory = os.path.join(script_directory, "logs")
-        self.log_directory_path = os.path.join(log_directory, log_subdirectory)
-        os.makedirs(self.log_directory_path, exist_ok=True)
-        return log_subdirectory
-
-    def log_action(self, action, info=None, system_time=None):
-        time_str = system_time.strftime('%Y-%m-%d %H:%M') if system_time else datetime.now().strftime('%Y-%m-%d %H:%M')
-        log_entry = f"{time_str}: {action}"
-        if info is not None:
-            log_entry += f" - {info}"
-        
-        self.logs.append(log_entry)
-        self.save_log_to_file(log_entry, system_time)
-        
-    def log_tree(self, hierarchy_root, label, system_time):
-        """
-        Builds a tree from the hierarchy root and logs it as a string.
-        """
-        def build_tree(hierarchy_node, parent_id=None, tree=None):
-            if tree is None:
-                tree = Tree()
-            tree.create_node(tag=hierarchy_node.hierarchy.id, identifier=hierarchy_node.hierarchy.id, parent=parent_id)
-            for sub_agent in hierarchy_node.hierarchy.sub_agents:
-                build_tree(sub_agent, hierarchy_node.hierarchy.id, tree)
-            return tree
-
-        # Build the tree
-        tree = build_tree(hierarchy_root)
-
-        # Convert the tree to a string
-        tree_str = tree.show(stdout=False)
-
-        # Create the log entry
-        log_entry = f"Tree Structure for {label}:\n{tree_str}"
-
-        # Log the action
-        self.log_action("Tree Structure Logged", log_entry, system_time)
-        
-        
-    def log_war_situation(self, label, war_situation, decision, system_time):
-        situation_summary = (
-            f"{label} War Situation - Total Agents: {war_situation['total_agents']}, "
-            f"Command Structure Impact: {war_situation['command_structure_impact']}, "
-            f"Morale Collapse Impact: {war_situation['morale_collapse_impact']}, "
-            f"Heavy Casualties: {war_situation['heavy_casualties_count']}, "
-            f"Total Troops: {war_situation['total_troops']}"
-        )
-        self.log_action("War Situation and Decision", situation_summary, system_time)
-
-    def save_log_to_file(self, log_entry, system_time):
-        filename = os.path.join(self.log_directory_path, f"{system_time.strftime('%Y%m%d-%H%M')}_simulation.log") if system_time else "general.log"
-        with open(filename, 'a') as file:
-            file.write(log_entry + "\n")
 
 
 class Sandbox:
@@ -140,6 +70,8 @@ class Sandbox:
         self.GPT4V = None
         self.vision_range = 100000
         self.on_agent_error = "continue"
+        # Per-step state snapshot format: "json" (versioned, resumable) or "pickle" (legacy).
+        self.snapshot_format = config.snapshot_format if config is not None else "json"
 
         # Phase 4 perf/cost
         self.execution_mode = "sequential"   # "sequential" | "parallel" (batch commander decisions per step)
@@ -228,12 +160,11 @@ class Sandbox:
     def my_vision_decoder(self, visionRequest_agent, extCallType=None):
         return vision_decoder(visionRequest_agent, self.shuffled_agent_list, extCallType, vision_range=self.vision_range)
         
-    def save_to_file(self):
+    def save_to_file(self) -> None:
         formatted_time = self.system_time.strftime('%Y-%m-%d %H_%M_%S')
-        filename = os.path.join(self.battle_logger.log_directory_path, f"{formatted_time}_sandbox.pkl")
-        with open(filename, 'wb') as file:
-            pickle.dump(self, file)
-        logger.info("Sandbox saved to %s", filename)
+        ext = "pkl" if self.snapshot_format == "pickle" else "state.json"
+        filename = os.path.join(self.battle_logger.log_directory_path, f"{formatted_time}_sandbox.{ext}")
+        save_state(self, filename, fmt=self.snapshot_format)
 
     def run_referee_and_log(self, agent):
         self.action_interact_evaluation.current_step = self.current_step
@@ -388,7 +319,7 @@ class Sandbox:
                 raise
         return failed
 
-    def simulate(self, total_minutes, step_minutes):
+    def simulate(self, total_minutes: int, step_minutes: int) -> list:
 
         results = []
         steps = total_minutes // step_minutes

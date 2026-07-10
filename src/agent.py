@@ -1,5 +1,4 @@
 # Standard library imports
-import json5 as json
 import logging
 import pickle
 import itertools
@@ -7,11 +6,15 @@ from abc import ABC, abstractmethod
 
 
 # Local application/library-specific imports
-from procoder.functional import format_prompt
-from procoder.prompt import Sequential, sharp2_indexing
 
 # Conflict info
 
+import agent_prompting
+import agent_parsing
+# BranchStreamlining is re-exported so `from agent import BranchStreamlining` keeps working
+# (redundant alias marks it as an intentional re-export for linters).
+from agent_state_sync import BranchStreamlining as BranchStreamlining
+from agent_state_sync import create_sub_agent, parsed_data_sync
 from utils.LLM_api import run_LLM
 from utils.VLM_api import run_gpt4v
 from utils.surrounding_visualization import plot_tactical_positions
@@ -73,55 +76,6 @@ class BasicAgent(ABC):
     @abstractmethod
     def execute(self):
         pass
-
-
-def BranchStreamlining(agent, target_agent_id):
-    logger.info("doing the BranchStreamlining")
-    sub_agent_entity = None
-    for sub_agent in agent.hierarchy.sub_agents:
-        if sub_agent.hierarchy.id == target_agent_id:
-            sub_agent_entity = sub_agent
-            break
-    
-    # Handle the case where the target agent is not found
-    if sub_agent_entity is None:
-        return "BranchStreamlining stop."
-    if sub_agent_entity.profile.moral == "Low":
-        streamlining_label  = "Prune"
-    else:
-        streamlining_label = "Merge"
-        
-    subsub_agents_list = sub_agent_entity.hierarchy.sub_agents
-    
-    if len(subsub_agents_list)>0:
-        for subsub_agent in subsub_agents_list:
-            subsub_agent.hierarchy.parent_agent = agent
-            agent.hierarchy.sub_agents.append(subsub_agent)
-            
-            
-    if streamlining_label == "Merge":
-        # Return sub-agent's remaining troops to parent pool; grandchildren become
-        # direct sub-agents of parent, so their original counts become parent's deployed.
-        agent.profile.deployed_num_of_troops -= sub_agent_entity.profile.original_num_of_troops
-        agent.profile.deployed_num_of_troops += sub_agent_entity.profile.deployed_num_of_troops
-        agent.profile.lost_num_of_troops += sub_agent_entity.profile.lost_num_of_troops
-
-    elif streamlining_label == "Prune":
-        # Sub-agent's remaining (not-yet-deployed) troops are lost; grandchildren
-        # survive as reparented children, so count their originals as parent's deployed.
-        agent.profile.deployed_num_of_troops -= sub_agent_entity.profile.original_num_of_troops
-        agent.profile.deployed_num_of_troops += sub_agent_entity.profile.deployed_num_of_troops
-        agent.profile.lost_num_of_troops += (
-            sub_agent_entity.profile.original_num_of_troops
-            - sub_agent_entity.profile.deployed_num_of_troops
-        )
-        
-    # disable the subagent
-    agent.hierarchy.sub_agents.remove(sub_agent_entity)
-    sub_agent_entity.mergedOrPruned = True
-
-    return "agent {agent.hierarchy.id} BranchStreamlining Done"
-
 
 
 class ConstantPromptConfig:
@@ -279,275 +233,46 @@ class Detachment_Agent(BasicAgent):
         return hash(self.hierarchy.id)
     
     @property
-    def prompt(self):
+    def prompt(self) -> str:
         return self.construct_prompt()
-    
-    def generate_action_list(self):
-        actions_text = '\n'.join([
-            # f"{action}: {properties.get('prompt', 'No description available')}"
-            f"{action}"
-            for action, properties in self.profile.action_property_definition.items()
-        ])
-        return actions_text
 
-    
-    def validate_parsed_output(self, json_data):
-        invalid_messages = []
-        
-        # Validate root object fields
-        if not isinstance(json_data.get("agentNextActionType"), str):
-            invalid_messages.append("agentNextActionType must be a String")
-        if not isinstance(json_data.get("remarks"), str):
-            invalid_messages.append("remarks must be a String")
-        if not isinstance(json_data.get("SubAgentsRecall"), list) or not all(isinstance(item, str) for item in json_data.get("SubAgentsRecall", [])):
-            invalid_messages.append("SubAgentsRecall must be a list of Strings")
-        if json_data.get("agentMoral") not in ["High", "Medium", "Low"]:
-            invalid_messages.append("agentMoral must be 'High', 'Medium', or 'Low'")
-        if not isinstance(json_data.get("speed"), int):
-            invalid_messages.append("speed must be an Integer")
-        if not isinstance(json_data.get("agentNextPosition"), list) or len(json_data.get("agentNextPosition", [])) != 2 or not all(isinstance(item, int) for item in json_data.get("agentNextPosition", [])):
-            invalid_messages.append("agentNextPosition must be an Array of 2 Integers")
-        if not isinstance(json_data.get("deploySubUnit"), bool):
-            invalid_messages.append("deploySubUnit must be a Boolean")
-        if not isinstance(json_data.get("targetedAgentId", ""), str):
-            invalid_messages.append("targetedAgentId must be a String")
+    # --- Parsing / validation (delegates to agent_parsing) ---
+    def validate_parsed_output(self, json_data: dict) -> list:
+        return agent_parsing.validate_parsed_output(json_data)
 
-        # Validate actions array and its objects
-        actions = json_data.get("actions", [])
-        if not isinstance(actions, list):
-            invalid_messages.append("actions must be an Array of Objects")
-        else:
-            for action in actions:
-                if not isinstance(action.get("subAgent_NextActionType"), str):
-                    invalid_messages.append("Each action's subAgent_NextActionType must be a String")
-                if not isinstance(action.get("troopType"), str):
-                    invalid_messages.append("Each action's troopType must be a String")
-                if not isinstance(action.get("speed"), int):
-                    invalid_messages.append("Each action's speed must be an Integer")
-                if not isinstance(action.get("deployedNum"), int):
-                    invalid_messages.append("Each action's deployedNum must be an Integer")
-                if not isinstance(action.get("ownPotentialLostNum"), int):
-                    invalid_messages.append("Each action's ownPotentialLostNum must be an Integer")
-                if not isinstance(action.get("enemyPotentialLostNum"), int):
-                    invalid_messages.append("Each action's enemyPotentialLostNum must be an Integer")
-                if not isinstance(action.get("position"), list) or len(action.get("position", [])) != 2 or not all(isinstance(item, int) for item in action.get("position", [])):
-                    invalid_messages.append("Each action's position must be an Array of 2 Integers")
-                if not isinstance(action.get("agent_id"), str):
-                    invalid_messages.append("Each action's agent_id must be a String")
-                if not isinstance(action.get("remarks"), str):
-                    invalid_messages.append("Each action's remarks must be a String")
-                    
-        return invalid_messages
+    def parse_llm_output(self, LLM_response: str):
+        return agent_parsing.parse_llm_output(LLM_response)
 
-    
-    def _static_prefix(self):
-        """The invariant leading block of the prompt (battle lore, army, action space, json
-        contract, mission, map). Has no per-step interpolation, so it is rendered once and
-        memoized — this is also the contiguous prefix marked for Anthropic prompt caching.
+    # --- Prompt construction (delegates to agent_prompting) ---
+    def generate_action_list(self) -> str:
+        return agent_prompting.generate_action_list(self)
 
-        Note: System_Setting (round number), RoleSetting (position/sub-agents) and
-        TroopInformation (troop counts) interpolate per-step state, so they live in the
-        dynamic suffix, not here.
-        """
-        if self._static_prefix_cache is not None:
-            return self._static_prefix_cache
+    def _static_prefix(self) -> str:
+        return agent_prompting.static_prefix(self)
 
-        actions_text = self.generate_action_list()
-        prefix = format_prompt(
-            Sequential(
-                self.profile.history_setting,
-                self.profile.army_setting,
-                self.profile.action_instruction_block,
-                self.profile.json_constraint_variable,
-            ).set_sep("\n\n").set_indexing_method(sharp2_indexing),
-            {"profile": self.profile, "hierarchy": self.hierarchy},
-        )
-        prefix += "\n\n" + "## initial mission\n" + "initial mission refers to the first task or objective assigned to the country_E Commander at the start of the game.\n" + self.profile.initial_mission
-        prefix += "\n\n" + f"## battle field infomation\n This JSON data describes a map of Battle field.  It includes geographic features, military movements, and other relevant details.\n {self.profile.map_info_json}. The map's dimensions range from -1000 to +1000. Going beyond this range (leaving the map's boundaries) is considered a defeat of this agent."
-        prefix += "\n\n" + "## Action Space\n" + "In this simulation, you can use the following actions.\n" + actions_text
+    def _history_text(self) -> str:
+        return agent_prompting.history_text(self)
 
-        self._static_prefix_cache = prefix
-        return prefix
+    def _dynamic_suffix(self) -> str:
+        return agent_prompting.dynamic_suffix(self)
 
-    def _history_text(self):
-        """Returns the history block content, truncated to the last ``history_window`` decisions.
-
-        ``history_window > 0`` -> the last K parsed JSON decisions (compact). ``<= 0`` -> the
-        legacy full raw-response dump. Full history is always retained in
-        ``self.LLM_response_history`` regardless.
-        """
-        if self.history_window and self.history_window > 0:
-            recent = sorted(self.extracted_json_history.items())[-self.history_window:]
-            return json.dumps({str(nb): decision for nb, decision in recent})
-        return f"{self.LLM_response_history}"
-
-    def _dynamic_suffix(self):
-        """The per-step portion of the prompt: framing/role/troop state plus the live
-        battlefield situation, retry feedback and truncated history."""
-        suffix = format_prompt(
-            Sequential(
-                self.profile.System_Setting,
-                self.profile.RoleSetting,
-                self.profile.TroopInformation,
-            ).set_sep("\n\n").set_indexing_method(sharp2_indexing),
-            {"profile": self.profile, "hierarchy": self.hierarchy},
-        )
-
-        ## assemble the invalid messages
-        flat_invalid_messages = [message for sublist in self.round_invalid_messages for message in sublist]
-        invalid_messages_str = "\n".join(flat_invalid_messages)
-        suffix += "\n\n" + invalid_messages_str
-
-        suffix += "\n\n" + "## History Action Plan\n" + f"This is your analysis and planning from previous rounds. It will assist you in determining the stage of the war, helping you make significant decisions.\n {self._history_text()}"
-
-        suffix += "\n\n" + "## Current Battlefield Situation\n" + f"This is what's happening around you. You can discern the number of enemies and allies, as well as their current actions, within a certain range.\n {self.profile.CurrentBattlefieldSituation}"
-
-        suffix += "\n\n" + "War is on the verge of breaking out. To initiate an attack on the enemy, based on the speed you've estimated, you and your deployed sub-agents will advance towards the enemy, navigating by the coordinates."
-
-        if self.action_restrictions_require:
-            suffix += "\n\n" + "## Restriction on Sub-Agent Deployment\n" + "Limitation: Due to previous extensive deployment of sub-agents, your current strategy must be confined to your main force, requiring the 'actions' array in the output JSON to include only one action specifically for your command. This constraint prohibits dispatching subsidiary agents and ensures a singular, focused action directive."
-
-        suffix += "\n\n" + self.additional_prompt
-        return suffix
-
-    def prompt_parts(self):
+    def prompt_parts(self) -> tuple[str, str]:
         """Returns (static_prefix, dynamic_suffix). Callers that batch or cache use these
         separately; ``construct_prompt`` joins them for the plain string path."""
-        return self._static_prefix(), self._dynamic_suffix()
+        return agent_prompting.prompt_parts(self)
 
-    def construct_prompt(self):
-        prefix, suffix = self.prompt_parts()
-        return prefix + "\n\n" + suffix
+    def construct_prompt(self) -> str:
+        return agent_prompting.construct_prompt(self)
 
-    
+    # --- State synchronization (delegates to agent_state_sync) ---
+    def parsed_data_sync(self, parsed_json: dict) -> list:
+        return parsed_data_sync(self, parsed_json)
 
-    def parse_llm_output(self, LLM_response):
-        def extract_json_from_text(text):
-            """
-            Extracts the JSON part from a given string which may contain mixed content.
-            It assumes that the JSON part starts with '{' and ends with '}'.
-            """
-            try:
-                # Finding the indices of the first '{' and the last '}'
-                start_index = text.index('{')
-                end_index = text.rindex('}') + 1
-
-                # Extracting the JSON substring
-                json_part = text[start_index:end_index]
-
-                # Attempting to parse the JSON part
-                parsed_json = json.loads(json_part)
-                return parsed_json
-            except ValueError as e:
-                # Error handling if JSON parsing fails
-                return f"Error extracting JSON: {e}"
-
-        extracted_json = extract_json_from_text(LLM_response)
-        
-        if not isinstance(extracted_json, dict):
-            logger.warning("Failed to extract JSON from LLM response: %s", LLM_response)
-        else:
-            pass
-        
-
-        return extracted_json
-
-    def parsed_data_sync(self, parsed_json):
-        sync_results = []
-        if parsed_json["agentMoral"]:
-            self.profile.moral = parsed_json["agentMoral"]
-        
-        if parsed_json["SubAgentsRecall"]:
-            for recalled_agent_id in parsed_json["SubAgentsRecall"]:
-                BranchStreamlining(self, recalled_agent_id)
-                logger.info("do the BranchStreamlining")
-
-        if self.profile.position != parsed_json["agentNextPosition"]:
-            logger.info("Moved from %s to %s", self.profile.position, parsed_json['agentNextPosition'])
-        else:
-            logger.info("position no change")
-        
-        if len(parsed_json['agentNextPosition']) == 2 and all(isinstance(item, int) for item in parsed_json['agentNextPosition']):
-            self.profile.position = parsed_json["agentNextPosition"]
-            self.profile.position_updated_hist(self.profile.round_nb, parsed_json["agentNextPosition"])
-        # self.profile.position_hist_dict.append(parsed_json["currentAgentPosition"])
-
-        self.profile.current_action = parsed_json["agentNextActionType"] + " " + parsed_json["remarks"]
-        self.hierarchy.target_agent_id = parsed_json.get("targetedAgentId", "")
-        # Process each action in the actions list
-        for action in parsed_json["actions"]:
-            if len(action['position']) == 2 and all(isinstance(item, int) for item in action['position']):
-                new_sub_agent = self.create_sub_agent(action)
-                
-                
-                new_sub_agent.hierarchy.target_agent_id = action["agent_id"]
-                new_sub_agent.profile.troopType = action["troopType"]
-                
-                sync_results.append({"action": action["subAgent_NextActionType"], "result": "sub_agent_created", "sub_agent": new_sub_agent})
-                if "deployedNum" in action and action['deployedNum'] not in ["All available", "All remaining"]:
-                    self.profile.deployed_num_of_troops += int(action['deployedNum'])
-
-        # Check for other conditions like Crushing Defeat or fleeing Off the Map
-        if (self.profile.remaining_num_of_troops < self.profile.original_num_of_troops * self.profile.crushing_defeat_remaining_frac
-                or self.profile.lost_num_of_troops > self.profile.original_num_of_troops * self.profile.crushing_defeat_lost_frac):
-            self.profile.current_stage = "Crushing Defeat"
-
-        if self.profile.position[0] > 1000 or self.profile.position[1] > 1000:
-            self.profile.current_stage = "fleeing Off the Map"
-
-        # Emit a structured decision event (no-op if no event logger was wired by the sandbox).
-        if self.event_logger is not None:
-            self.event_logger.decision(
-                step=self.current_step,
-                agent_id=self.hierarchy.id,
-                identity=self.profile.identity,
-                action=parsed_json.get("agentNextActionType", ""),
-                position=self.profile.position,
-                deployed=self.profile.deployed_num_of_troops,
-            )
-
-        # Return the results of the synchronization
-        return sync_results
-    
     ### Misc method
-    def create_sub_agent(self, action):
-        # Create a new profile based on the current agent's profile
-        new_profile = Detachment_AgentProfile(
-            identity=self.profile.identity,  
-            position=action['position'], 
-            original_num_of_troops=int(action['deployedNum']) if action['deployedNum'] != "All available" else self.profile.remaining_num_of_troops,  # set troop count based on action
-            initial_mission=action["subAgent_NextActionType"],
-            constant_prompt_config=self.profile.constant_prompt_config,
-            max_deploy_percent=self.profile.max_deploy_percent,
-            crushing_defeat_remaining_frac=self.profile.crushing_defeat_remaining_frac,
-            crushing_defeat_lost_frac=self.profile.crushing_defeat_lost_frac,
-            round_interval=self.profile.round_interval,
-        )
-        
-        # Create a new hierarchy level for the subunit
-        new_hierarchy = Detachment_AgentHierarchy(
-            level=self.hierarchy.level + 1,  # Set the hierarchy level one step deeper
-            parent_agent=self  # Set the current hierarchy as the parent
-        )
+    def create_sub_agent(self, action: dict) -> "Detachment_Agent":
+        return create_sub_agent(self, action)
 
-        # Initialize the new sub-agent
-        new_sub_agent = Detachment_Agent(self.model_type, new_profile, new_hierarchy)
-        new_sub_agent.new_born = True
-        new_sub_agent.log_folder_name = self.log_folder_name
-        new_sub_agent.parser_mode = self.parser_mode
-        new_sub_agent.token_accumulator = self.token_accumulator
-        new_sub_agent.history_window = self.history_window
-        new_sub_agent.prompt_caching = self.prompt_caching
-        new_sub_agent.event_logger = self.event_logger
-        new_sub_agent.current_step = self.current_step
 
-        # Add the new sub-agent to the current hierarchy
-        self.hierarchy.add_sub_agent(new_sub_agent)
-        
-
-        return new_sub_agent
-
-    
     def DEVELOPING_MODE_save_sync_results_with_pickle(self, sync_results, file_path):
         with open(file_path, 'wb') as file:
             pickle.dump(sync_results, file)
@@ -620,7 +345,7 @@ class Detachment_Agent(BasicAgent):
             return run_LLM(self.model_type, suffix, self.token_accumulator, "commander", cache_prefix=prefix)
         return self.run_model(self.prompt)
 
-    def execute(self, LLM_response=None):
+    def execute(self, LLM_response: str = None) -> dict:
         max_attempts = 3
         attempts = 0
 

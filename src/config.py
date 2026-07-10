@@ -31,6 +31,7 @@ class SimulationConfig:
     history_window: int = 3
     prompt_caching: bool = False
     on_agent_error: str = "continue"
+    snapshot_format: str = "json"   # per-step state snapshot: "json" (versioned) or "pickle" (legacy)
 
     # --- tunable constants (previously hardcoded literals) ---
     vision_range: int = 100000            # was simulation_controller.py CLI default
@@ -69,6 +70,7 @@ class SimulationConfig:
             history_window=args.history_window,
             prompt_caching=args.prompt_caching,
             on_agent_error=args.on_agent_error,
+            snapshot_format=args.snapshot_format,
             vision_range=args.vision_range,
             max_deploy_percent=args.max_deploy_percent,
             crushing_defeat_remaining_frac=args.crushing_defeat_remaining_frac,

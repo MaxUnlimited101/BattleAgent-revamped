@@ -1,0 +1,146 @@
+## Game History Setting
+1. Time of Event: 14th century
+
+## **country_E Army Profile**
+1. Command Structure: 
+(1) Supreme Commander: Prince of the country 
+(2) Subordinate Leaders: Notable figures with significant operational autonomy
+2. Morale and Discipline: 
+(1) Exceptionally high morale due to previous victories and effective leadership 
+(2) Strict discipline and innovative tactics, especially the use of the longbow
+3. Military Strategy: 
+(1) Offensive strategy utilizing terrain advantages 
+(2) Skilled use of longbows to weaken enemy before engaging in close combat, underscored by ambitious tactical innovations.
+4. Key Weaponry: 
+(1) Key Weapon: Longbow, a decisive factor in battle 
+(2) Combination of longbowmen and dismounted men-at-arms for a balanced force
+5. Force Size and Composition: 
+Size Estimate: Around 6,000-7,000 
+Composition: Primarily local longbowmen, complemented by men-at-arms and a small number of mounted knights
+6. Armament and Protection: 
+Armor: Combination of mail and plate armor for men-at-arms. 
+Shields: Limited use, focusing on mobility and bow usage. 
+Weapons: Longbows, swords, and other hand-held weapons for close combat.
+
+## Action Choosing Instructions
+
+
+1. Thought for Action: Develop your thoughts step-by-step.
+2. The Actions to Perform: Choose action among '## Action Space'.
+3. Present Final Action List in JSON format: Format your final action list in JSON. and follow json template in the ##json constraint.
+
+## json constraint: 
+The JSON needs to reflect the following elements:
+
+The JSON structure can be formalized as follows, You need to strictly adhere to the given JSON format:
+
+- **Root Object**:
+  - **agentNextActionType**: String
+  - **targetedAgentId**: String
+  - **remarks**: String
+  - **SubAgentsRecall**: list(String)
+  - **agentMoral**: string (can be "High", "Medium", "Low")
+  - **speed**: Integer
+  - **agentNextPosition**: Array of 2 Integers 
+  - **deploySubUnit**: Boolean
+  - **actions**: Array of Objects (actions for new deployed sub-units)
+    - Each Object contains:
+      - **subAgent_NextActionType**: String
+      - **troopType**: String
+      - **speed**: Integer (the unit is in coordinate units per minute. (This indicates how many units of the coordinate system the entity moves per minute.))
+      - **deployedNum**: Integer
+      - **ownPotentialLostNum**: Integer
+      - **enemyPotentialLostNum**: Integer
+      - **position**: Array of 2 Integers (This likely represents the X and Y coordinates in a 2D space, determining the entity's location on a grid or map.)
+      - **agent_id**: String (can be "None") 
+      - **remarks**: String (description of the action in detail)
+      
+      ### Definition of JSON Keys:
+      1.agentNextPosition: Given the `speed`, ## Current Battlefield Situation and ## History Action Plan, what position do you think you should and can move to next before next game round?
+      2.position: This is the agent's location at the beginning of the next round. Factors like the battlefield dynamics and the movement speed of your chosen troop type should be considered.
+      3.agent_id, targetedAgentId: Those identifiy potential enemies you may encounter in the near future. You need to choose a suitable 'agent_id' from the ## Current Battlefield Situation - 'enemy' - 'agent_id'.
+      4.ownPotentialLostNum: This is the estimated number of casualties that the agent will suffer if the action is executed. You should consider the current sitatuation and give the reasonable estimation.
+      5.enemyPotentialLostNum: This is the estimated number of casualties that the enemy will suffer if the action is executed.
+      6.deployedNum: An estimate of the deployment number should be given. It only can be an integer, not any string like 'All'.
+      7.deploySubUnit: This indicates who executes an action: `true` means it's carried out by a subordinate platoon, while `false` means the commander's main force executes it. 
+      8.speed:The speed parameter is measured in coordinate units per minute. One coordinate unit is equivalent to 10 yards in the simulated environment.
+      9.SubAgentsRecall: If you consider the situation urgent, you may attempt to recall a sub-agent. However, you should not recall an agent unless absolutely necessary.
+      
+Estimating Losses
+Estimate potential losses (ownPotentialLostNum and enemyPotentialLostNum) based on the action type, troop strength, and historical data or simulations provided within the game. These estimates should be as accurate as possible to reflect the expected outcomes of your actions.
+
+
+
+## initial mission
+initial mission refers to the first task or objective assigned to the country_E Commander at the start of the game.
+win the battles
+
+## battle field infomation
+ This JSON data describes a map of Battle field.  It includes geographic features, military movements, and other relevant details.
+ {'MapFeatures': {'NorthDirection': 'Upwards', 'Scale': {'ratio': 'Each unit on the map corresponds to 10 yards in real-world distance'}}, 'Geography': {'VillageP': {'coordinates': [0, 0], 'shape': {'area': 'Not specified', 'perimeter': 'Not specified', 'description': 'Central village'}, 'properties': {'type': 'Village'}, 'description': 'Central village on the map'}, 'VillageN': {'coordinates': [100, -250], 'shape': {'area': 'Not specified', 'perimeter': 'Not specified', 'description': 'Shape and size details of the village are not specified on the map.'}, 'properties': {'type': 'Village'}, 'description': 'Southeast of VillageP, named as VillageN'}, 'RiverMain': {'path': {'start': [-200, 100], 'end': [0, -300], 'description': 'Meanders from northwest to southeast.'}, 'properties': {'type': 'River'}, 'description': 'Main river, flows from the northwest past PositionP and down to the south.'}, 'RiverBranch': {'path': {'start': [0, -100], 'end': [150, -250], 'description': 'Branches off from the main river towards the southeast.'}, 'properties': {'type': 'River'}, 'description': 'Branch of the main river flowing towards WoodN'}, 'WoodL': {'coordinates': [-150, 50], 'shape': {'area': 'Not specified', 'perimeter': 'Not specified', 'description': 'Wooded area to the northwest.'}, 'properties': {'type': 'Forest'}, 'description': ''}, 'WoodN': {'coordinates': [100, -150], 'shape': {'area': 'Not specified', 'perimeter': 'Not specified', 'description': 'Wooded area in the center-east.'}, 'properties': {'type': 'Forest'}, 'description': 'Wood at central-eastern wooded area.'}, 'WoodS': {'coordinates': [150, -350], 'shape': {'area': 'Not specified', 'perimeter': 'Not specified', 'description': 'Wooded area in the southeast.'}, 'properties': {'type': 'Forest'}, 'description': ''}}}. The map's dimensions range from -1000 to +1000. Going beyond this range (leaving the map's boundaries) is considered a defeat of this agent.
+
+## Action Space
+In this simulation, you can use the following actions.
+Wait without Action
+Reposition Forces
+Initiate Skirmish
+Deploy Longbows
+Charge Cavalry
+Ambush Enemy
+Construct Defenses
+Rally Troops
+Retreat and Regroup
+Launch Full Assault
+Fortify Position
+Employ Artillery
+Archery Duel
+Cavalry Charge
+Prepare Defenses
+Set Traps
+Siege Tactics
+Use of Gunpowder Weapons
+Hand-to-Hand Combat
+Tactical Retreat
+Counterattack
+Conduct Reconnaissance
+Create Decoy Units
+Fortify Rear Guard
+Direct Artillery Fire
+Conduct Feigned Retreats
+Employ Scorched Earth Tactics
+Implement Guerilla Warfare
+Engage in Siege Warfare
+Organize Raiding Parties
+Establish Defensive Fortifications
+Execute Flanking Maneuvers
+Create Diversions
+Implement Supply Chain Disruption
+Use Cavalry for Shock Tactics
+Develop Counter-Siege Measures
+Implement Decoy Strategies
+Form Defensive Shields
+Create Obstacles for Enemy Cavalry
+Employ Archers
+Form Defensive Pike Formations
+
+## Overall Setting: 
+You are now a participant in a virtual strategy game, representing a commander in the country_E. This game is structured around two main parties: the country_F Army and the country_E Army. Each game round lasts 15 minutes, and the game is currently in round 1. You should select actions from the '## Action Space' that fit your persona and are likely for your situation. To get a better understanding of the current state of affairs, please refer to the '## Current Battlefield Situation' section to learn about the latest developments around you.
+
+
+## role_setting: You are a country_E Commander of at Level 1 in the command structure on the battlefield, positioned at [15, -10] now. Your initial mission is win the battles. You are responsible to ARMY-0001 (parent node). Your subordinates include [] (sub nodes).
+
+## troop_information: Your unit initially had 6000 personnel, now this unit have 6000. 0 members have been casualties. 0 members have been deployed externally.
+Restrictions: (1) The total number of soldiers deployed externally should not exceed 3600; (2) You should not deploy a sub-unit of less than 100 soldiers. You must adhere to these two restrictions when you provide the decision in JSON format.
+
+
+
+## History Action Plan
+This is your analysis and planning from previous rounds. It will assist you in determining the stage of the war, helping you make significant decisions.
+ {}
+
+## Current Battlefield Situation
+This is what's happening around you. You can discern the number of enemies and allies, as well as their current actions, within a certain range.
+ Enemy forces spotted near [0, 0].
+
+War is on the verge of breaking out. To initiate an attack on the enemy, based on the speed you've estimated, you and your deployed sub-agents will advance towards the enemy, navigating by the coordinates.
+

@@ -1,11 +1,8 @@
 import argparse
+import logging
 from dotenv import load_dotenv
 load_dotenv()
 
-from prompt.map_setting_of_other_battles import map_info_json_Agincourt, map_info_json_Falkirk, map_info_json_Poitiers
-from prompt.agent_profile_Poitiers import country_E_Army_Poitiers, country_F_Army_Poitiers, System_Setting_Poitiers, History_Setting_Poitiers
-from prompt.agent_profile_Falkirk import country_E_Army_Falkirk, country_F_Army_Falkirk, System_Setting_Falkirk, History_Setting_Falkirk
-from prompt.agent_profile_Agincourt import country_E_Army_Agincourt, country_F_Army_Agincourt, System_Setting_Agincourt, History_Setting_Agincourt
 from prompt.Detachment_Agent_prompt import (
     RoleSetting,
     TroopInformation,
@@ -15,91 +12,19 @@ from prompt.Detachment_Agent_prompt import (
 )
 from prompt.action_space_setting import action_list, action_property_definition
 
-from agent import ConstantPromptConfig, Detachment_Agent, Detachment_AgentHierarchy, Detachment_AgentProfile
+from agent import ConstantPromptConfig, Detachment_Agent, Detachment_AgentHierarchy, Detachment_AgentProfile, reset_agent_ids
+from battles import get_battle, BATTLES
+from config import SimulationConfig
 from sandbox import Sandbox
+from utils.logging_setup import configure_logging
 
-class ConflictConfig():
-    def __init__(self, battle_name):
-        self.battle_name = battle_name
-
-    def get_opposing_agent_profile(self):
-        # Battle configuration
-        if self.battle_name == "Poitiers":
-            country_E_agent_profile = Detachment_AgentProfile(
-                identity="country_E",
-                position=[15, -10],  
-                original_num_of_troops=6000,  
-                constant_prompt_config = country_E_constant_prompt_config
-            )
-
-            country_F_agent_profile = Detachment_AgentProfile(
-            identity="country_F", 
-                position=[-10, 5],  
-                original_num_of_troops=15000,  
-                constant_prompt_config = country_F_constant_prompt_config 
-            )
-        elif self.battle_name == "Falkirk":
-            country_E_agent_profile = Detachment_AgentProfile(
-                identity="country_E",
-                position=[0, 0],  
-                original_num_of_troops=15000,  
-                constant_prompt_config = country_E_constant_prompt_config
-            )
-
-            country_F_agent_profile = Detachment_AgentProfile(
-            identity="country_F", 
-                position=[50, 0],  
-                original_num_of_troops=6000,  
-                constant_prompt_config = country_F_constant_prompt_config 
-            )
-            
-        elif self.battle_name == "Agincourt":
-            country_E_agent_profile = Detachment_AgentProfile(
-                identity="country_E",
-                position= [0,-100],  
-                original_num_of_troops=6500,  
-                constant_prompt_config = country_E_constant_prompt_config
-            )
-
-            country_F_agent_profile = Detachment_AgentProfile(
-                identity="country_F", 
-                position=[15, -50], 
-                original_num_of_troops=35000, 
-                constant_prompt_config = country_F_constant_prompt_config 
-            )
-        else:
-            return "Invalid conflict name. Please choose from 'Poitiers', 'Falkirk', or 'Agincourt'."
-
-        return country_E_agent_profile, country_F_agent_profile
-
-    def get_prompt_config_args(self):
-        if self.battle_name == "Poitiers":
-            map_info_json_Type = map_info_json_Poitiers
-            System_Setting_Type = System_Setting_Poitiers
-            History_Setting_Type = History_Setting_Poitiers
-            country_E_Army_Type = country_E_Army_Poitiers
-            country_F_Army_Type = country_F_Army_Poitiers
-        elif self.battle_name == "Falkirk":
-            map_info_json_Type = map_info_json_Falkirk
-            System_Setting_Type = System_Setting_Falkirk
-            History_Setting_Type = History_Setting_Falkirk
-            country_E_Army_Type = country_E_Army_Falkirk
-            country_F_Army_Type = country_F_Army_Falkirk
-        elif self.battle_name == "Agincourt":
-            map_info_json_Type = map_info_json_Agincourt
-            System_Setting_Type = System_Setting_Agincourt
-            History_Setting_Type = History_Setting_Agincourt
-            country_E_Army_Type = country_E_Army_Agincourt
-            country_F_Army_Type = country_F_Army_Agincourt
-        else:
-            return "Invalid conflict name. Please choose from 'Poitiers', 'Falkirk', or 'Agincourt'."
-        return System_Setting_Type, History_Setting_Type, country_E_Army_Type, country_F_Army_Type, map_info_json_Type
+logger = logging.getLogger(__name__)
 
 
 if __name__ == '__main__':
-    
-    parser = argparse.ArgumentParser(description='Run a conflict simulation.') 
-    parser.add_argument('--conflict_name', type=str, choices=['Poitiers', 'Falkirk', 'Agincourt'], default= "Poitiers",help='choose conflict name') 
+
+    parser = argparse.ArgumentParser(description='Run a conflict simulation.')
+    parser.add_argument('--conflict_name', type=str, choices=sorted(BATTLES), default= "Poitiers",help='choose conflict name')
     parser.add_argument('--LLM_MODEL', type=str, choices=["claude", "gpt", "openrouter", "ollama", "fake"], default="gpt", help='Language model to use')
     parser.add_argument("--is_GPT4V_activate", type=int, default=0, help="Use GPT-4 V instead of GPT-4")
     parser.add_argument('--simulation_time', type=int, default=90, help='Number of minutes to simulate')
@@ -118,100 +43,96 @@ if __name__ == '__main__':
     parser.add_argument('--referee_model', type=str, choices=["claude", "gpt", "openrouter", "ollama", "fake"], default=None, help='LLM for referee (defaults to --LLM_MODEL)')
     parser.add_argument('--diary_model', type=str, choices=["claude", "gpt", "openrouter", "ollama", "fake"], default=None, help='LLM for diary soldiers (defaults to --LLM_MODEL)')
 
+    # Phase 5 tunable constants (defaults reproduce prior hardcoded behavior).
+    parser.add_argument('--max_deploy_percent', type=float, default=0.6, help='Max fraction of original troops an agent may deploy')
+    parser.add_argument('--crushing_defeat_remaining_frac', type=float, default=0.1, help='Remaining-troop fraction below which an agent is a Crushing Defeat')
+    parser.add_argument('--crushing_defeat_lost_frac', type=float, default=0.5, help='Lost-troop fraction above which an agent is a Crushing Defeat')
+    parser.add_argument('--sub_agent_threshold', type=int, default=5, help='Sub-agent count that triggers action restrictions')
+    parser.add_argument('--diary_injury_prob', type=float, default=0.3, help='Per-diary probability a soldier sustains an injury')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for the simulation RNG')
+
     args = parser.parse_args()
-    
-    LLM_MODEL = args.LLM_MODEL
-    simulation_time = args.simulation_time
-    update_interval = args.update_interval
-    conflict_name = args.conflict_name
-    GPT4V = bool(args.is_GPT4V_activate)
-    Is_have_diaries = bool(args.have_diaries)
-    Does_continue_run = bool(args.continue_run)
-    vision_range = args.vision_range
-    on_agent_error = args.on_agent_error
-    parser_mode = args.parser
-    commander_model = args.commander_model or LLM_MODEL
-    referee_model = args.referee_model or LLM_MODEL
-    diary_model = args.diary_model or LLM_MODEL
 
-    if LLM_MODEL not in ("gpt", "fake") and GPT4V == True:
+    config = SimulationConfig.from_args(args)
+    configure_logging()  # console handler now; the per-run file handler is added by the sandbox
+    # Deterministic agent ids: reset the counter before any agent is constructed.
+    reset_agent_ids()
+    
+    GPT4V = config.gpt4v
+
+    if config.llm_model not in ("gpt", "fake") and GPT4V:
         raise ValueError("GPT-4 V is only available for GPT model.")
-    
-    if LLM_MODEL == "gpt" and GPT4V == True:
-        model_name_to_log = "gpt4V"
-    else:
-        model_name_to_log = LLM_MODEL
-    
-    LOG_FOLER_NMAE = f"{conflict_name}_{model_name_to_log}_{simulation_time}_{update_interval}"
-    print(f"LOG_FOLER_NMAE: {LOG_FOLER_NMAE}")
 
-    conflict_config = ConflictConfig(conflict_name)
-    System_Setting_Type, History_Setting_Type, country_E_Army_Type, country_F_Army_Type,map_info_json_Type = conflict_config.get_prompt_config_args()
-    
-    country_E_constant_prompt_config = ConstantPromptConfig(
-        System_Setting=System_Setting_Type,
-        History_Setting=History_Setting_Type,
-        
-        army_setting=country_E_Army_Type,
-        
-        role_setting=RoleSetting,
-        troop_information=TroopInformation,
-        json_constraint_variable=json_constraint_variable,
-        json_example_text=json_example_text,
-        action_list=action_list,
-        action_property_definition=action_property_definition,
-        action_instruction_block=action_instruction_block,
-        map_info_json=map_info_json_Type,
-        additional_settings={} 
-    )
+    model_name_to_log = "gpt4V" if (config.llm_model == "gpt" and GPT4V) else config.llm_model
+    LOG_FOLER_NMAE = f"{config.conflict_name}_{model_name_to_log}_{config.simulation_time}_{config.update_interval}"
+    logger.info("LOG_FOLER_NMAE: %s", LOG_FOLER_NMAE)
 
-    country_F_constant_prompt_config = ConstantPromptConfig(
-        System_Setting=System_Setting_Type,
-        History_Setting=History_Setting_Type,
-        
-        army_setting=country_F_Army_Type,
-        
-        role_setting=RoleSetting,
-        troop_information=TroopInformation,
-        json_constraint_variable=json_constraint_variable,
-        json_example_text=json_example_text,
-        action_list=action_list,
-        action_property_definition=action_property_definition,
-        action_instruction_block=action_instruction_block,
-        map_info_json=map_info_json_Type,
-        additional_settings={}  
+    battle = get_battle(config.conflict_name)
+
+    def _make_prompt_config(army_setting):
+        return ConstantPromptConfig(
+            System_Setting=battle.system_setting,
+            History_Setting=battle.history_setting,
+            army_setting=army_setting,
+            role_setting=RoleSetting,
+            troop_information=TroopInformation,
+            json_constraint_variable=json_constraint_variable,
+            json_example_text=json_example_text,
+            action_list=action_list,
+            action_property_definition=action_property_definition,
+            action_instruction_block=action_instruction_block,
+            map_info_json=battle.map_info_json,
+            additional_settings={},
+        )
+
+    _profile_kwargs = dict(
+        max_deploy_percent=config.max_deploy_percent,
+        crushing_defeat_remaining_frac=config.crushing_defeat_remaining_frac,
+        crushing_defeat_lost_frac=config.crushing_defeat_lost_frac,
+        round_interval=config.round_interval,
     )
-    
-    country_E_agent_profile, country_F_agent_profile = conflict_config.get_opposing_agent_profile()
+    country_E_agent_profile = Detachment_AgentProfile(
+        identity="country_E",
+        position=list(battle.country_E_position),
+        original_num_of_troops=battle.country_E_troops,
+        constant_prompt_config=_make_prompt_config(battle.country_E_army),
+        **_profile_kwargs,
+    )
+    country_F_agent_profile = Detachment_AgentProfile(
+        identity="country_F",
+        position=list(battle.country_F_position),
+        original_num_of_troops=battle.country_F_troops,
+        constant_prompt_config=_make_prompt_config(battle.country_F_army),
+        **_profile_kwargs,
+    )
 
     country_E_agent_hierarchy = Detachment_AgentHierarchy(level = 1, parent_agent= None)
     country_F_agent_hierarchy = Detachment_AgentHierarchy(level = 1, parent_agent= None)
-    
-    country_E_agent_root = Detachment_Agent(commander_model, country_E_agent_profile, country_E_agent_hierarchy)
-    country_F_agent_root = Detachment_Agent(commander_model, country_F_agent_profile, country_F_agent_hierarchy)
-    country_E_agent_root.parser_mode = parser_mode
-    country_F_agent_root.parser_mode = parser_mode
+
+    country_E_agent_root = Detachment_Agent(config.commander_model, country_E_agent_profile, country_E_agent_hierarchy)
+    country_F_agent_root = Detachment_Agent(config.commander_model, country_F_agent_profile, country_F_agent_hierarchy)
     for root in (country_E_agent_root, country_F_agent_root):
-        root.history_window = args.history_window
-        root.prompt_caching = args.prompt_caching
+        root.parser_mode = config.parser_mode
+        root.history_window = config.history_window
+        root.prompt_caching = config.prompt_caching
 
     country_E_agent_hierarchy.parent_agent = country_E_agent_root
     country_F_agent_hierarchy.parent_agent = country_F_agent_root
 
     # conflict name and time only used for logging
-    sandbox = Sandbox(LLM_MODEL, map_info_json_Type, LOG_FOLER_NMAE, "1300-01-01 12:00", country_E_agent_root, country_F_agent_root,
-                      referee_model=referee_model, diary_model=diary_model)
+    sandbox = Sandbox(config.llm_model, battle.map_info_json, LOG_FOLER_NMAE, "1300-01-01 12:00", country_E_agent_root, country_F_agent_root,
+                      referee_model=config.referee_model, diary_model=config.diary_model, config=config)
 
-    sandbox.have_diaries = Is_have_diaries
-    sandbox.continue_run = Does_continue_run
+    sandbox.have_diaries = config.have_diaries
+    sandbox.continue_run = config.continue_run
     sandbox.GPT4V = GPT4V
-    sandbox.LLM_MODEL = LLM_MODEL
-    sandbox.vision_range = vision_range
-    sandbox.on_agent_error = on_agent_error
-    sandbox.execution_mode = args.execution_mode
-    sandbox.max_concurrency = args.max_concurrency
+    sandbox.LLM_MODEL = config.llm_model
+    sandbox.vision_range = config.vision_range
+    sandbox.on_agent_error = config.on_agent_error
+    sandbox.execution_mode = config.execution_mode
+    sandbox.max_concurrency = config.max_concurrency
 
-    if args.execution_mode == "parallel" and GPT4V:
-        print("WARNING: parallel execution mode is incompatible with GPT4V; falling back to sequential.")
+    if config.execution_mode == "parallel" and GPT4V:
+        logger.warning("parallel execution mode is incompatible with GPT4V; falling back to sequential.")
 
-    simulation_results = sandbox.simulate(simulation_time, update_interval)
+    simulation_results = sandbox.simulate(config.simulation_time, config.update_interval)

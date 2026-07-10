@@ -101,5 +101,7 @@ Estimate potential losses (ownPotentialLostNum and enemyPotentialLostNum) based 
 json_example_text = ""
 
 if __name__ == '__main__':
-    prompt_variables = {}  
-    print(json_example_text)
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    prompt_variables = {}
+    logging.getLogger(__name__).info("%s", json_example_text)

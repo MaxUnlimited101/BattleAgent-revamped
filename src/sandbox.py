@@ -1,4 +1,5 @@
 # Standard library imports
+import logging
 import os
 import pickle
 import random
@@ -13,10 +14,14 @@ from treelib import Tree
 # Local application/library-specific imports
 from agent import AgentExecutionError
 from utils.shared_func import vision_decoder
+from utils.event_log import EventLogger
+from utils.logging_setup import configure_logging
+from utils.run_metadata import write_run_config
 from group_experience.individual_profile import Soldier_Profiles, SoldierCollector
 from support_agents.referee import Action_Interact_Evaluation
 from support_agents.sim_stopper import ceasefire_decision_maker
-random.seed(42)
+
+logger = logging.getLogger(__name__)
 
 
                 
@@ -88,8 +93,16 @@ class BattleLogger:
 
 
 class Sandbox:
-    def __init__(self, model_type, map_info_json, campaign_name, start_time_str, country_E_agent_root, country_F_agent_root, subAgentNBThreshold=5, referee_model=None, diary_model=None):
+    def __init__(self, model_type, map_info_json, campaign_name, start_time_str, country_E_agent_root, country_F_agent_root, subAgentNBThreshold=5, referee_model=None, diary_model=None, config=None):
         from utils.token_accounting import TokenAccumulator
+
+        # Central config (Phase 5). When absent, keep all pre-Phase-5 default constants.
+        self.config = config
+        if config is not None:
+            subAgentNBThreshold = config.sub_agent_threshold
+
+        # Seed the RNG per run for reproducibility (was a module-level random.seed(42)).
+        random.seed(config.seed if config is not None else 42)
 
         # Basic properties
         self.model_type = model_type
@@ -108,9 +121,19 @@ class Sandbox:
 
         # Logging setup
         self.battle_logger = BattleLogger(self.campaign_name)
+        # Root logger -> console + <run_dir>/simulation.log, and the structured JSONL event stream.
+        configure_logging(self.battle_logger.log_directory_path)
+        self.event_logger = EventLogger(self.battle_logger.log_directory_path)
+        self.current_step = None
 
         self.country_F_collector = SoldierCollector(Soldier_Profiles["country_F"], initial_root_agent=country_F_agent_root, model_type=self.model_type)
         self.country_E_collector = SoldierCollector(Soldier_Profiles["country_E"], initial_root_agent=country_E_agent_root, model_type=self.model_type)
+
+        # Propagate the configurable diary injury probability to all soldier personas.
+        if config is not None:
+            for collector in (self.country_E_collector, self.country_F_collector):
+                for soldier_agent in collector.soldier_agents_list:
+                    soldier_agent.profile.injury_prob = config.diary_injury_prob
 
         self.continue_run = False
         self.have_diaries = True
@@ -125,6 +148,9 @@ class Sandbox:
         self.subAgentNBThreshold = subAgentNBThreshold
 
         self.action_interact_evaluation = Action_Interact_Evaluation(self.model_type, self.shuffled_agent_list, self.country_E_agent_list, self.country_F_agent_list, self.map_info_json)
+        # Wire the structured event stream into the referee for casualty events.
+        self.action_interact_evaluation.event_logger = self.event_logger
+        self.action_interact_evaluation.current_step = None
 
         # Apply per-role model overrides
         if referee_model:
@@ -205,11 +231,12 @@ class Sandbox:
     def save_to_file(self):
         formatted_time = self.system_time.strftime('%Y-%m-%d %H_%M_%S')
         filename = os.path.join(self.battle_logger.log_directory_path, f"{formatted_time}_sandbox.pkl")
-        with open(filename, 'wb') as file: 
+        with open(filename, 'wb') as file:
             pickle.dump(self, file)
-        print(f"Sandbox saved to {filename}")
-    
+        logger.info("Sandbox saved to %s", filename)
+
     def run_referee_and_log(self, agent):
+        self.action_interact_evaluation.current_step = self.current_step
         self.action_interact_evaluation.para_update(self.shuffled_agent_list, self.country_E_agent_list, self.country_F_agent_list)
         message = self.action_interact_evaluation.single_agent_evaluate(agent)
         if message!=None:
@@ -232,6 +259,9 @@ class Sandbox:
         agent.profile.agent_clock = self.system_time
         agent.profile.round_nb = step
         agent.profile.round_interval = step_minutes
+        # Wire the structured event stream so decision events carry the current step.
+        agent.event_logger = self.event_logger
+        agent.current_step = self.current_step
         return vision_info
 
     def _run_diaries(self, soldier_agents_list, agent, vision_info):
@@ -249,8 +279,7 @@ class Sandbox:
         )
         for diary_index, (soldier_agent, journal) in enumerate(zip(soldiers, journals)):
             soldier_agent.collect(self.system_time, journal)
-            print(f"diary {diary_index} has been collected")
-            print("--------------")
+            logger.info("diary %s has been collected", diary_index)
             self.battle_logger.log_action("diary", f"diary {diary_index} has been collected", self.system_time)
 
     def _post_decision(self, agent, vision_info, step_results):
@@ -284,7 +313,7 @@ class Sandbox:
         """Decide + resolve one agent at a time (original behavior). Returns # of agent failures."""
         failed = 0
         for agent in tqdm(shuffled_list):
-            print(f"current agent list length: {len(self.country_E_agent_list) + len(self.country_F_agent_list)}")
+            logger.info("current agent list length: %s", len(self.country_E_agent_list) + len(self.country_F_agent_list))
             try:
                 vision_info = self._prep_agent(agent, step, step_minutes)
                 if vision_info is None:
@@ -378,9 +407,14 @@ class Sandbox:
         self.country_E_agent_root.log_folder_name  = self.battle_logger.log_directory_path
         
         self.battle_logger.log_action("parameter", f"GPT4V:{self.GPT4V}, LLM_MODEL: {self.LLM_MODEL} continue_run:{self.continue_run}, have_diaries:{self.have_diaries}", self.system_time)
-        
+
+        # Reproducibility artifact: capture the full config, resolved models, seed and git SHA.
+        if self.config is not None:
+            write_run_config(self.battle_logger.log_directory_path, self.config)
+
         for step in range(steps):
             self.advance_time(step_minutes)
+            self.current_step = step + 1
             step_results = {
                 "step": step + 1, 
                 "time": self.system_time.strftime('%Y-%m-%d %H:%M'), 
@@ -402,6 +436,9 @@ class Sandbox:
             step_tokens = (self.token_accumulator.total_input + self.token_accumulator.total_output) - tokens_before
             step_timings.append(step_wall)
 
+            self.event_logger.tokens(step=step + 1, step_tokens=step_tokens, wall_seconds=round(step_wall, 3),
+                                     cumulative=self.token_accumulator.total_input + self.token_accumulator.total_output)
+
             country_F_war_situation, country_F_decision = ceasefire_decision_maker(self.country_F_agent_root)
             country_E_war_situation, country_E_decision = ceasefire_decision_maker(self.country_E_agent_root)
 
@@ -420,7 +457,7 @@ class Sandbox:
                 
                 # Break out of the simulation loop if any decision is made
                 if country_F_decision or country_E_decision:
-                    print("Decision made, simulation stopped")
+                    logger.info("Decision made, simulation stopped")
                     if not self.continue_run:
                         break
 
@@ -454,7 +491,7 @@ class Sandbox:
             f"Wall-time: {total_wall:.2f}s total, {mean_wall:.2f}s/step. "
             f"Tokens: {total_tokens} total, {mean_tokens:.0f}/step."
         )
-        print(summary)
+        logger.info(summary)
         self.battle_logger.log_action("RunSummary", summary, self.system_time)
 
         return results

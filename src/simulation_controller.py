@@ -21,6 +21,67 @@ from utils.logging_setup import configure_logging
 logger = logging.getLogger(__name__)
 
 
+def _make_prompt_config(battle, army_setting):
+    return ConstantPromptConfig(
+        System_Setting=battle.system_setting,
+        History_Setting=battle.history_setting,
+        army_setting=army_setting,
+        role_setting=RoleSetting,
+        troop_information=TroopInformation,
+        json_constraint_variable=json_constraint_variable,
+        json_example_text=json_example_text,
+        action_list=action_list,
+        action_property_definition=action_property_definition,
+        action_instruction_block=action_instruction_block,
+        map_info_json=battle.map_info_json,
+        additional_settings={},
+    )
+
+
+def build_root_agents(config, battle):
+    """Construct the two root ``Detachment_Agent``s (and their prompt config) for a battle.
+
+    Shared by the CLI entrypoint and ``state_serialization.load_state`` so the reconstruction of a
+    saved run matches a fresh run exactly. Callers that need reproducible ids should call
+    ``reset_agent_ids()`` before this.
+    """
+    profile_kwargs = dict(
+        max_deploy_percent=config.max_deploy_percent,
+        crushing_defeat_remaining_frac=config.crushing_defeat_remaining_frac,
+        crushing_defeat_lost_frac=config.crushing_defeat_lost_frac,
+        round_interval=config.round_interval,
+    )
+    country_E_agent_profile = Detachment_AgentProfile(
+        identity="country_E",
+        position=list(battle.country_E_position),
+        original_num_of_troops=battle.country_E_troops,
+        constant_prompt_config=_make_prompt_config(battle, battle.country_E_army),
+        **profile_kwargs,
+    )
+    country_F_agent_profile = Detachment_AgentProfile(
+        identity="country_F",
+        position=list(battle.country_F_position),
+        original_num_of_troops=battle.country_F_troops,
+        constant_prompt_config=_make_prompt_config(battle, battle.country_F_army),
+        **profile_kwargs,
+    )
+
+    country_E_agent_hierarchy = Detachment_AgentHierarchy(level=1, parent_agent=None)
+    country_F_agent_hierarchy = Detachment_AgentHierarchy(level=1, parent_agent=None)
+
+    country_E_agent_root = Detachment_Agent(config.commander_model, country_E_agent_profile, country_E_agent_hierarchy)
+    country_F_agent_root = Detachment_Agent(config.commander_model, country_F_agent_profile, country_F_agent_hierarchy)
+    for root in (country_E_agent_root, country_F_agent_root):
+        root.parser_mode = config.parser_mode
+        root.history_window = config.history_window
+        root.prompt_caching = config.prompt_caching
+
+    country_E_agent_hierarchy.parent_agent = country_E_agent_root
+    country_F_agent_hierarchy.parent_agent = country_F_agent_root
+
+    return country_E_agent_root, country_F_agent_root
+
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run a conflict simulation.')
@@ -34,6 +95,7 @@ if __name__ == '__main__':
     parser.add_argument('--continue_run', type=int, default=1, help='Whether to continue run')
     parser.add_argument('--vision_range', type=int, default=100000, help='Fog-of-war radius in map units (default 100000 = omniscient)')
     parser.add_argument('--on_agent_error', type=str, choices=['continue', 'abort'], default='continue', help='What to do when an agent raises AgentExecutionError')
+    parser.add_argument('--snapshot-format', dest='snapshot_format', type=str, choices=['json', 'pickle'], default='json', help='Per-step state snapshot format: json=versioned & resumable, pickle=legacy whole-object')
     parser.add_argument('--parser', type=str, choices=['legacy', 'structured'], default='legacy', help='JSON validation mode: legacy=manual checks, structured=Pydantic models')
     parser.add_argument('--execution-mode', dest='execution_mode', type=str, choices=['sequential', 'parallel'], default='sequential', help='sequential=one agent at a time; parallel=batch commander decisions per step')
     parser.add_argument('--max-concurrency', dest='max_concurrency', type=int, default=8, help='Max concurrent LLM calls per batch (parallel mode and diary batching)')
@@ -69,55 +131,7 @@ if __name__ == '__main__':
 
     battle = get_battle(config.conflict_name)
 
-    def _make_prompt_config(army_setting):
-        return ConstantPromptConfig(
-            System_Setting=battle.system_setting,
-            History_Setting=battle.history_setting,
-            army_setting=army_setting,
-            role_setting=RoleSetting,
-            troop_information=TroopInformation,
-            json_constraint_variable=json_constraint_variable,
-            json_example_text=json_example_text,
-            action_list=action_list,
-            action_property_definition=action_property_definition,
-            action_instruction_block=action_instruction_block,
-            map_info_json=battle.map_info_json,
-            additional_settings={},
-        )
-
-    _profile_kwargs = dict(
-        max_deploy_percent=config.max_deploy_percent,
-        crushing_defeat_remaining_frac=config.crushing_defeat_remaining_frac,
-        crushing_defeat_lost_frac=config.crushing_defeat_lost_frac,
-        round_interval=config.round_interval,
-    )
-    country_E_agent_profile = Detachment_AgentProfile(
-        identity="country_E",
-        position=list(battle.country_E_position),
-        original_num_of_troops=battle.country_E_troops,
-        constant_prompt_config=_make_prompt_config(battle.country_E_army),
-        **_profile_kwargs,
-    )
-    country_F_agent_profile = Detachment_AgentProfile(
-        identity="country_F",
-        position=list(battle.country_F_position),
-        original_num_of_troops=battle.country_F_troops,
-        constant_prompt_config=_make_prompt_config(battle.country_F_army),
-        **_profile_kwargs,
-    )
-
-    country_E_agent_hierarchy = Detachment_AgentHierarchy(level = 1, parent_agent= None)
-    country_F_agent_hierarchy = Detachment_AgentHierarchy(level = 1, parent_agent= None)
-
-    country_E_agent_root = Detachment_Agent(config.commander_model, country_E_agent_profile, country_E_agent_hierarchy)
-    country_F_agent_root = Detachment_Agent(config.commander_model, country_F_agent_profile, country_F_agent_hierarchy)
-    for root in (country_E_agent_root, country_F_agent_root):
-        root.parser_mode = config.parser_mode
-        root.history_window = config.history_window
-        root.prompt_caching = config.prompt_caching
-
-    country_E_agent_hierarchy.parent_agent = country_E_agent_root
-    country_F_agent_hierarchy.parent_agent = country_F_agent_root
+    country_E_agent_root, country_F_agent_root = build_root_agents(config, battle)
 
     # conflict name and time only used for logging
     sandbox = Sandbox(config.llm_model, battle.map_info_json, LOG_FOLER_NMAE, "1300-01-01 12:00", country_E_agent_root, country_F_agent_root,

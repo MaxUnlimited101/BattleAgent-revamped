@@ -1,0 +1,54 @@
+{"type": "decision", "t": 1, "agent_id": "ARMY-E1", "identity": "country_E", "action": "Hold line", "position": [24, 76], "deployed": 433, "remarks": "Push the archers before they range in.", "moral": "High", "target": "ARMY-F3"}
+{"type": "decision", "t": 1, "agent_id": "ARMY-E2", "identity": "country_E", "action": "Regroup", "position": [7, 63], "deployed": 129, "remarks": "Casualties mounting, consolidate the line.", "moral": "High", "target": "ARMY-F1"}
+{"type": "decision", "t": 1, "agent_id": "ARMY-E3", "identity": "country_E", "action": "Hold line", "position": [31, 75], "deployed": 135, "remarks": "Screen our flank with cavalry.", "moral": "High", "target": "ARMY-F3"}
+{"type": "decision", "t": 1, "agent_id": "ARMY-F1", "identity": "country_F", "action": "Envelop", "position": [73, 13], "deployed": 163, "remarks": "Screen our flank with cavalry.", "moral": "Low", "target": "ARMY-E1"}
+{"type": "decision", "t": 1, "agent_id": "ARMY-F2", "identity": "country_F", "action": "Volley", "position": [84, 33], "deployed": 123, "remarks": "Casualties mounting, consolidate the line.", "moral": "High", "target": "ARMY-E2"}
+{"type": "decision", "t": 1, "agent_id": "ARMY-F3", "identity": "country_F", "action": "Envelop", "position": [63, 11], "deployed": 160, "remarks": "Casualties mounting, consolidate the line.", "moral": "Medium", "target": "ARMY-E3"}
+{"type": "casualties_assessed", "t": 1, "agent_id": "ARMY-F3", "casualties": 56, "estimated_loss_percentage": "23%"}
+{"type": "casualties_assessed", "t": 1, "agent_id": "ARMY-E2", "casualties": 176, "estimated_loss_percentage": "25%"}
+{"type": "tokens", "t": 1, "step_tokens": 2769, "cumulative": 0, "wall_seconds": 1.43}
+{"type": "decision", "t": 2, "agent_id": "ARMY-E1", "identity": "country_E", "action": "Regroup", "position": [20, 69], "deployed": 205, "remarks": "Their left is exposed \u2014 commit reserves.", "moral": "Low", "target": "ARMY-F2"}
+{"type": "decision", "t": 2, "agent_id": "ARMY-E2", "identity": "country_E", "action": "Regroup", "position": [11, 69], "deployed": 572, "remarks": "Their left is exposed \u2014 commit reserves.", "moral": "Medium", "target": "ARMY-F2"}
+{"type": "decision", "t": 2, "agent_id": "ARMY-E3", "identity": "country_E", "action": "Flank left", "position": [32, 72], "deployed": 141, "remarks": "Casualties mounting, consolidate the line.", "moral": "Medium", "target": "ARMY-F3"}
+{"type": "decision", "t": 2, "agent_id": "ARMY-F1", "identity": "country_F", "action": "Fall back", "position": [64, 15], "deployed": 247, "remarks": "Casualties mounting, consolidate the line.", "moral": "High", "target": "ARMY-E1"}
+{"type": "decision", "t": 2, "agent_id": "ARMY-F2", "identity": "country_F", "action": "Volley", "position": [74, 38], "deployed": 487, "remarks": "Hold the ridge; make them come uphill.", "moral": "High", "target": "ARMY-E2"}
+{"type": "decision", "t": 2, "agent_id": "ARMY-F3", "identity": "country_F", "action": "Fortify", "position": [56, 4], "deployed": 491, "remarks": "Casualties mounting, consolidate the line.", "moral": "Low", "target": "ARMY-E2"}
+{"type": "casualties_assessed", "t": 2, "agent_id": "ARMY-E3", "casualties": 157, "estimated_loss_percentage": "23%"}
+{"type": "casualties_assessed", "t": 2, "agent_id": "ARMY-F3", "casualties": 146, "estimated_loss_percentage": "7%"}
+{"type": "tokens", "t": 2, "step_tokens": 2383, "cumulative": 2769, "wall_seconds": 2.41}
+{"type": "decision", "t": 3, "agent_id": "ARMY-E1", "identity": "country_E", "action": "Advance", "position": [29, 63], "deployed": 474, "remarks": "Exploit the gap in their center.", "moral": "Medium", "target": "ARMY-F3"}
+{"type": "decision", "t": 3, "agent_id": "ARMY-E2", "identity": "country_E", "action": "Hold line", "position": [19, 70], "deployed": 554, "remarks": "Exploit the gap in their center.", "moral": "Medium", "target": "ARMY-F1"}
+{"type": "decision", "t": 3, "agent_id": "ARMY-E3", "identity": "country_E", "action": "Flank left", "position": [40, 75], "deployed": 412, "remarks": "Push the archers before they range in.", "moral": "Medium", "target": "ARMY-F1"}
+{"type": "decision", "t": 3, "agent_id": "ARMY-F1", "identity": "country_F", "action": "Volley", "position": [64, 16], "deployed": 478, "remarks": "Screen our flank with cavalry.", "moral": "Medium", "target": "ARMY-E2"}
+{"type": "decision", "t": 3, "agent_id": "ARMY-F2", "identity": "country_F", "action": "Volley", "position": [65, 32], "deployed": 329, "remarks": "Their left is exposed \u2014 commit reserves.", "moral": "Low", "target": "ARMY-E2"}
+{"type": "decision", "t": 3, "agent_id": "ARMY-F3", "identity": "country_F", "action": "Envelop", "position": [58, 9], "deployed": 242, "remarks": "Exploit the gap in their center.", "moral": "Medium", "target": "ARMY-E2"}
+{"type": "casualties_assessed", "t": 3, "agent_id": "ARMY-F3", "casualties": 89, "estimated_loss_percentage": "9%"}
+{"type": "casualties_assessed", "t": 3, "agent_id": "ARMY-F1", "casualties": 51, "estimated_loss_percentage": "10%"}
+{"type": "tokens", "t": 3, "step_tokens": 2619, "cumulative": 5152, "wall_seconds": 1.19}
+{"type": "decision", "t": 4, "agent_id": "ARMY-E1", "identity": "country_E", "action": "Hold line", "position": [30, 55], "deployed": 525, "remarks": "Casualties mounting, consolidate the line.", "moral": "High", "target": "ARMY-F2"}
+{"type": "decision", "t": 4, "agent_id": "ARMY-E2", "identity": "country_E", "action": "Flank left", "position": [22, 62], "deployed": 314, "remarks": "Casualties mounting, consolidate the line.", "moral": "Medium", "target": "ARMY-F3"}
+{"type": "decision", "t": 4, "agent_id": "ARMY-E3", "identity": "country_E", "action": "Regroup", "position": [44, 71], "deployed": 586, "remarks": "Casualties mounting, consolidate the line.", "moral": "High", "target": "ARMY-F2"}
+{"type": "decision", "t": 4, "agent_id": "ARMY-F1", "identity": "country_F", "action": "Fall back", "position": [58, 20], "deployed": 301, "remarks": "Push the archers before they range in.", "moral": "Medium", "target": "ARMY-E3"}
+{"type": "decision", "t": 4, "agent_id": "ARMY-F2", "identity": "country_F", "action": "Volley", "position": [59, 25], "deployed": 134, "remarks": "Screen our flank with cavalry.", "moral": "Medium", "target": "ARMY-E1"}
+{"type": "decision", "t": 4, "agent_id": "ARMY-F3", "identity": "country_F", "action": "Envelop", "position": [61, 11], "deployed": 126, "remarks": "Push the archers before they range in.", "moral": "High", "target": "ARMY-E3"}
+{"type": "casualties_assessed", "t": 4, "agent_id": "ARMY-E2", "casualties": 55, "estimated_loss_percentage": "35%"}
+{"type": "casualties_assessed", "t": 4, "agent_id": "ARMY-F2", "casualties": 123, "estimated_loss_percentage": "24%"}
+{"type": "tokens", "t": 4, "step_tokens": 2104, "cumulative": 7771, "wall_seconds": 0.92}
+{"type": "decision", "t": 5, "agent_id": "ARMY-E1", "identity": "country_E", "action": "Flank left", "position": [30, 59], "deployed": 424, "remarks": "Hold the ridge; make them come uphill.", "moral": "Medium", "target": "ARMY-F3"}
+{"type": "decision", "t": 5, "agent_id": "ARMY-E2", "identity": "country_E", "action": "Advance", "position": [27, 69], "deployed": 159, "remarks": "Their left is exposed \u2014 commit reserves.", "moral": "Medium", "target": "ARMY-F2"}
+{"type": "decision", "t": 5, "agent_id": "ARMY-E3", "identity": "country_E", "action": "Advance", "position": [53, 72], "deployed": 173, "remarks": "Push the archers before they range in.", "moral": "Medium", "target": "ARMY-F3"}
+{"type": "decision", "t": 5, "agent_id": "ARMY-F1", "identity": "country_F", "action": "Volley", "position": [56, 27], "deployed": 364, "remarks": "Push the archers before they range in.", "moral": "High", "target": "ARMY-E3"}
+{"type": "decision", "t": 5, "agent_id": "ARMY-F2", "identity": "country_F", "action": "Envelop", "position": [54, 21], "deployed": 568, "remarks": "Push the archers before they range in.", "moral": "Low", "target": "ARMY-E2"}
+{"type": "decision", "t": 5, "agent_id": "ARMY-F3", "identity": "country_F", "action": "Envelop", "position": [65, 11], "deployed": 287, "remarks": "Screen our flank with cavalry.", "moral": "Medium", "target": "ARMY-E1"}
+{"type": "casualties_assessed", "t": 5, "agent_id": "ARMY-F2", "casualties": 158, "estimated_loss_percentage": "15%"}
+{"type": "casualties_assessed", "t": 5, "agent_id": "ARMY-F3", "casualties": 87, "estimated_loss_percentage": "24%"}
+{"type": "tokens", "t": 5, "step_tokens": 2799, "cumulative": 9875, "wall_seconds": 2.17}
+{"type": "decision", "t": 6, "agent_id": "ARMY-E1", "identity": "country_E", "action": "Flank left", "position": [36, 58], "deployed": 365, "remarks": "Their left is exposed \u2014 commit reserves.", "moral": "Medium", "target": "ARMY-F3"}
+{"type": "decision", "t": 6, "agent_id": "ARMY-E2", "identity": "country_E", "action": "Charge", "position": [21, 61], "deployed": 341, "remarks": "Hold the ridge; make them come uphill.", "moral": "High", "target": "ARMY-F3"}
+{"type": "decision", "t": 6, "agent_id": "ARMY-E3", "identity": "country_E", "action": "Charge", "position": [58, 78], "deployed": 588, "remarks": "Hold the ridge; make them come uphill.", "moral": "High", "target": "ARMY-F1"}
+{"type": "decision", "t": 6, "agent_id": "ARMY-F1", "identity": "country_F", "action": "Fall back", "position": [59, 26], "deployed": 200, "remarks": "Hold the ridge; make them come uphill.", "moral": "High", "target": "ARMY-E2"}
+{"type": "decision", "t": 6, "agent_id": "ARMY-F2", "identity": "country_F", "action": "Counter-charge", "position": [60, 28], "deployed": 509, "remarks": "Exploit the gap in their center.", "moral": "High", "target": "ARMY-E3"}
+{"type": "decision", "t": 6, "agent_id": "ARMY-F3", "identity": "country_F", "action": "Volley", "position": [68, 15], "deployed": 344, "remarks": "Screen our flank with cavalry.", "moral": "Medium", "target": "ARMY-E3"}
+{"type": "casualties_assessed", "t": 6, "agent_id": "ARMY-E3", "casualties": 131, "estimated_loss_percentage": "19%"}
+{"type": "casualties_assessed", "t": 6, "agent_id": "ARMY-E1", "casualties": 132, "estimated_loss_percentage": "28%"}
+{"type": "tokens", "t": 6, "step_tokens": 2347, "cumulative": 12674, "wall_seconds": 2.03}

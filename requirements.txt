@@ -11,3 +11,7 @@ treelib>=1.8.0
 tqdm>=4.0.0
 numpy>=1.24.0
 matplotlib>=3.7.0
+
+# Optional: live browser visualizer (BATTLE_LIVE_VIZ). Import is guarded, so the
+# simulation runs without it; only live streaming to viz/battle_viewer.html needs it.
+websockets>=12.0

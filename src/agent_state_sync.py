@@ -117,6 +117,9 @@ def parsed_data_sync(agent: "Detachment_Agent", parsed_json: dict) -> list[dict]
             action=parsed_json.get("agentNextActionType", ""),
             position=agent.profile.position,
             deployed=agent.profile.deployed_num_of_troops,
+            remarks=parsed_json.get("remarks"),
+            moral=parsed_json.get("agentMoral"),
+            target=parsed_json.get("targetedAgentId"),
         )
 
     # Return the results of the synchronization

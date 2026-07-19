@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BattleAgent — LLM Decision Viewer</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c232c; --border: #2a323d;
+    --text: #e6edf3; --muted: #8b98a5; --blue: #4c9dff; --red: #ff6b6b;
+    --amber: #f0b429; --green: #3fb950; --accent: #7c5cff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; padding: 10px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  header h1 .dim { color: var(--muted); font-weight: 400; }
+  .spacer { flex: 1; }
+  .ctl { display: flex; align-items: center; gap: 6px; }
+  button, select, label.filebtn {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer;
+  }
+  button:hover, label.filebtn:hover { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  input[type=range] { accent-color: var(--accent); }
+  input[type=text] {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 8px; font-size: 13px; width: 150px;
+  }
+  .status { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.err { background: var(--red); }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  #stage { flex: 1; position: relative; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #legend {
+    position: absolute; left: 12px; bottom: 12px; background: rgba(22,27,34,.85);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 12px;
+    display: flex; gap: 16px;
+  }
+  #legend .item { display: flex; align-items: center; gap: 6px; }
+  #legend .swatch { width: 10px; height: 10px; border-radius: 50%; }
+
+  aside {
+    width: 400px; background: var(--panel); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .hud { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); }
+  .hud .cell { background: var(--panel); padding: 10px 12px; }
+  .hud .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .hud .v { font-size: 18px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .feed-head {
+    padding: 8px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--muted); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between;
+  }
+  #feed { flex: 1; overflow-y: auto; padding: 6px 0; }
+  .ev { padding: 8px 12px; border-bottom: 1px solid var(--panel2); animation: fade .3s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; } }
+  .ev .row1 { display: flex; align-items: center; gap: 8px; }
+  .ev .badge {
+    font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: .4px;
+  }
+  .ev .badge.dec { background: rgba(124,92,255,.18); color: #b6a4ff; }
+  .ev .badge.cas { background: rgba(255,107,107,.18); color: var(--red); }
+  .ev .agent { font-weight: 600; font-size: 13px; }
+  .ev .agent.E { color: var(--blue); } .ev .agent.F { color: var(--red); }
+  .ev .step { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .ev .action { font-size: 12px; margin-top: 3px; }
+  .ev .action b { color: var(--amber); }
+  .ev .remarks { font-size: 12px; color: var(--muted); margin-top: 3px; font-style: italic; }
+  .ev .meta { font-size: 11px; color: var(--muted); margin-top: 3px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .empty { color: var(--muted); text-align: center; padding: 30px 12px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚔️ BattleAgent <span class="dim">· LLM Decision Viewer</span></h1>
+  <div class="spacer"></div>
+  <div class="ctl">
+    <label class="filebtn">📂 Load events.jsonl<input id="file" type="file" accept=".jsonl,.json,.txt" hidden></label>
+  </div>
+  <div class="ctl">
+    <input id="wsurl" type="text" value="ws://localhost:8765">
+    <button id="connect">🔴 Live</button>
+  </div>
+  <div class="ctl" id="replayctls">
+    <button id="playpause" disabled>▶︎</button>
+    <button id="step" disabled>Step ▸</button>
+    <label class="status">Speed <input id="speed" type="range" min="1" max="60" value="12"></label>
+    <button id="reset" disabled>⟲</button>
+  </div>
+  <div class="status"><span id="statdot" class="dot"></span><span id="status">idle</span></div>
+</header>
+<main>
+  <div id="stage">
+    <canvas id="canvas"></canvas>
+    <div id="legend">
+      <div class="item"><span class="swatch" style="background:var(--blue)"></span>country_E</div>
+      <div class="item"><span class="swatch" style="background:var(--red)"></span>country_F</div>
+      <div class="item"><span class="swatch" style="background:var(--muted)"></span>casualty</div>
+    </div>
+  </div>
+  <aside>
+    <div class="hud">
+      <div class="cell"><div class="k">Step</div><div class="v" id="h-step">—</div></div>
+      <div class="cell"><div class="k">Agents</div><div class="v" id="h-agents">0</div></div>
+      <div class="cell"><div class="k">Tokens</div><div class="v" id="h-tokens">0</div></div>
+    </div>
+    <div class="hud" style="grid-template-columns:1fr 1fr;">
+      <div class="cell"><div class="k">country_E losses</div><div class="v" id="h-lossE" style="color:var(--blue)">0</div></div>
+      <div class="cell"><div class="k">country_F losses</div><div class="v" id="h-lossF" style="color:var(--red)">0</div></div>
+    </div>
+    <div class="feed-head"><span>Decision Feed</span><span id="feed-count">0 events</span></div>
+    <div id="feed"><div class="empty">Load an <code>events.jsonl</code> file or connect to a live run.</div></div>
+  </aside>
+</main>
+<script>
+"use strict";
+// ---------- State ----------
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+let agents = new Map();        // agent_id -> {id, side, x, y, tx, ty, action, alive, deployed, flash}
+let bounds = null;             // {minX,maxX,minY,maxY} sticky auto-fit
+let tokens = 0, lossE = 0, lossF = 0, curStep = null, eventCount = 0;
+let allEvents = [];            // loaded (file) events for replay
+let playhead = 0, playing = false, timer = null;
+let ws = null;
+
+const el = id => document.getElementById(id);
+const sideOf = ident => (ident === "country_E" ? "E" : ident === "country_F" ? "F" : "N");
+const colorOf = side => side === "E" ? "#4c9dff" : side === "F" ? "#ff6b6b" : "#8b98a5";
+
+// ---------- Event application ----------
+function resetState() {
+  agents = new Map(); bounds = null; tokens = 0; lossE = 0; lossF = 0;
+  curStep = null; eventCount = 0; el("feed").innerHTML = ""; updateHud();
+}
+
+function growBounds(x, y) {
+  if (!bounds) bounds = { minX: x, maxX: x, minY: y, maxY: y };
+  else {
+    bounds.minX = Math.min(bounds.minX, x); bounds.maxX = Math.max(bounds.maxX, x);
+    bounds.minY = Math.min(bounds.minY, y); bounds.maxY = Math.max(bounds.maxY, y);
+  }
+}
+
+function applyEvent(e) {
+  eventCount++;
+  if (typeof e.t === "number") curStep = e.t;
+  if (e.type === "decision") {
+    const side = sideOf(e.identity);
+    const [x, y] = e.position || [0, 0];
+    growBounds(x, y);
+    let a = agents.get(e.agent_id);
+    if (!a) { a = { id: e.agent_id, side, x, y, tx: x, ty: y, alive: true, casualties: 0 }; agents.set(e.agent_id, a); }
+    a.side = side; a.tx = x; a.ty = y; a.alive = true;
+    a.action = e.action; a.deployed = e.deployed; a.remarks = e.remarks; a.moral = e.moral; a.target = e.target;
+    pushFeed(e);
+  } else if (e.type === "casualties_assessed") {
+    const a = agents.get(e.agent_id);
+    if (a) {
+      a.casualties = (a.casualties || 0) + (e.casualties || 0);
+      a.flash = 1;
+      if (a.side === "E") lossE += e.casualties || 0; else if (a.side === "F") lossF += e.casualties || 0;
+    }
+    pushFeed(e);
+  } else if (e.type === "tokens") {
+    if (typeof e.cumulative === "number") tokens = e.cumulative;
+  }
+  updateHud();
+}
+
+function updateHud() {
+  el("h-step").textContent = curStep ?? "—";
+  el("h-agents").textContent = [...agents.values()].filter(a => a.alive).length;
+  el("h-tokens").textContent = tokens.toLocaleString();
+  el("h-lossE").textContent = lossE.toLocaleString();
+  el("h-lossF").textContent = lossF.toLocaleString();
+  el("feed-count").textContent = eventCount + " events";
+}
+
+// ---------- Feed ----------
+function pushFeed(e) {
+  const feed = el("feed");
+  if (feed.firstChild && feed.firstChild.className === "empty") feed.innerHTML = "";
+  const div = document.createElement("div");
+  div.className = "ev";
+  const side = sideOf(e.identity);
+  const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+  if (e.type === "decision") {
+    div.innerHTML =
+      `<div class="row1"><span class="badge dec">decision</span>` +
+      `<span class="agent ${side}">${esc(e.agent_id)}</span><span class="step">t${e.t}</span></div>` +
+      `<div class="action">▸ <b>${esc(e.action || "—")}</b>${e.target && e.target !== "None" ? ` → ${esc(e.target)}` : ""}</div>` +
+      (e.remarks ? `<div class="remarks">“${esc(e.remarks)}”</div>` : "") +
+      `<div class="meta">` +
+        (e.moral ? `<span>morale: ${esc(e.moral)}</span>` : "") +
+        (e.deployed != null ? `<span>deployed: ${e.deployed}</span>` : "") +
+        (e.position ? `<span>@ [${e.position}]</span>` : "") +
+      `</div>`;
+  } else if (e.type === "casualties_assessed") {
+    div.innerHTML =
+      `<div class="row1"><span class="badge cas">casualties</span>` +
+      `<span class="agent">${esc(e.agent_id)}</span><span class="step">t${e.t}</span></div>` +
+      `<div class="action">−<b>${e.casualties}</b> troops` +
+      (e.estimated_loss_percentage != null ? ` <span class="meta" style="display:inline">(${e.estimated_loss_percentage})</span>` : "") + `</div>`;
+  } else return;
+  feed.appendChild(div);
+  while (feed.childElementCount > 400) feed.removeChild(feed.firstChild);
+  if (atBottom) feed.scrollTop = feed.scrollHeight;
+}
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+// ---------- Rendering ----------
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = canvas.parentElement.getBoundingClientRect();
+  canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", resize);
+
+function project(x, y, w, h) {
+  const pad = 60;
+  let bx0 = -10, bx1 = 10, by0 = -10, by1 = 10;
+  if (bounds) { bx0 = bounds.minX; bx1 = bounds.maxX; by0 = bounds.minY; by1 = bounds.maxY; }
+  const spanX = Math.max(bx1 - bx0, 1), spanY = Math.max(by1 - by0, 1);
+  const sx = (w - 2 * pad) / spanX, sy = (h - 2 * pad) / spanY;
+  const s = Math.min(sx, sy);
+  const cx = pad + (w - 2 * pad - s * spanX) / 2, cy = pad + (h - 2 * pad - s * spanY) / 2;
+  // Y is inverted so "north" is up on screen.
+  return [cx + (x - bx0) * s, cy + (by1 - y) * s];
+}
+
+function draw() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  ctx.clearRect(0, 0, w, h);
+  // grid
+  ctx.strokeStyle = "rgba(255,255,255,0.04)"; ctx.lineWidth = 1;
+  for (let i = 0; i <= 10; i++) {
+    const gx = (w / 10) * i, gy = (h / 10) * i;
+    ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
+  }
+  for (const a of agents.values()) {
+    // ease position toward target
+    a.x += (a.tx - a.x) * 0.15; a.y += (a.ty - a.y) * 0.15;
+    const [px, py] = project(a.x, a.y, w, h);
+    const col = colorOf(a.side);
+    if (a.flash > 0) {
+      ctx.beginPath(); ctx.arc(px, py, 10 + (1 - a.flash) * 22, 0, 7);
+      ctx.strokeStyle = `rgba(255,107,107,${a.flash})`; ctx.lineWidth = 2; ctx.stroke();
+      a.flash -= 0.03; if (a.flash < 0) a.flash = 0;
+    }
+    ctx.globalAlpha = a.alive ? 1 : 0.25;
+    ctx.beginPath(); ctx.arc(px, py, 7, 0, 7);
+    ctx.fillStyle = col; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(0,0,0,.4)"; ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "rgba(230,237,243,.75)"; ctx.font = "10px -apple-system, sans-serif";
+    ctx.fillText(a.id, px + 10, py + 3);
+  }
+  requestAnimationFrame(draw);
+}
+
+// ---------- File replay ----------
+el("file").addEventListener("change", async ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  disconnectWs();
+  const text = await f.text();
+  allEvents = text.split("\n").filter(l => l.trim()).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  resetState(); playhead = 0; setPlaying(false);
+  ["playpause", "step", "reset"].forEach(id => el(id).disabled = false);
+  setStatus(`loaded ${allEvents.length} events`, "on");
+});
+function advance() {
+  if (playhead >= allEvents.length) { setPlaying(false); return; }
+  applyEvent(allEvents[playhead++]);
+}
+function setPlaying(p) {
+  playing = p; el("playpause").textContent = p ? "❚❚" : "▶︎";
+  if (timer) { clearInterval(timer); timer = null; }
+  if (p) {
+    const fps = +el("speed").value;
+    timer = setInterval(() => { advance(); if (playhead >= allEvents.length) setPlaying(false); }, 1000 / fps);
+  }
+}
+el("playpause").onclick = () => { if (playhead >= allEvents.length) { resetState(); playhead = 0; } setPlaying(!playing); };
+el("step").onclick = () => { setPlaying(false); advance(); };
+el("reset").onclick = () => { setPlaying(false); resetState(); playhead = 0; };
+el("speed").oninput = () => { if (playing) setPlaying(true); };
+
+// ---------- Live WebSocket ----------
+el("connect").onclick = () => { ws ? disconnectWs() : connectWs(); };
+function connectWs() {
+  const url = el("wsurl").value.trim();
+  setStatus("connecting…", "");
+  try { ws = new WebSocket(url); } catch (e) { setStatus("bad URL", "err"); return; }
+  resetState(); allEvents = []; ["playpause", "step", "reset"].forEach(id => el(id).disabled = true);
+  ws.onopen = () => { setStatus("live · connected", "on"); el("connect").textContent = "■ Disconnect"; };
+  ws.onmessage = m => { try { applyEvent(JSON.parse(m.data)); } catch {} };
+  ws.onclose = () => { setStatus("disconnected", ""); el("connect").textContent = "🔴 Live"; ws = null; };
+  ws.onerror = () => { setStatus("connection error", "err"); };
+}
+function disconnectWs() { if (ws) { ws.onclose = null; ws.close(); ws = null; el("connect").textContent = "🔴 Live"; } }
+
+function setStatus(msg, cls) {
+  el("status").textContent = msg;
+  el("statdot").className = "dot" + (cls ? " " + cls : "");
+}
+
+resize(); requestAnimationFrame(draw);
+</script>
+</body>
+</html>
